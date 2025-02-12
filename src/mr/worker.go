@@ -5,6 +5,21 @@ import "log"
 import "net/rpc"
 import "hash/fnv"
 
+import (
+	"io/ioutil"
+	"os"
+	"time"
+	"strconv"
+	"encoding/json"
+	"sort"
+)
+
+// for sorting by key.
+type ByKey []KeyValue
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 //
 // Map functions return a slice of KeyValue.
@@ -24,6 +39,78 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
+func FileNameXY (X int, Y int) string {
+	s := "./mr"
+	s += strconv.Itoa(X)
+	s += "-"
+	s += strconv.Itoa(Y)
+	return s
+}
+func ApplyMap (mapf func (string, string) [] KeyValue, reply Reply) {
+	// create the kva
+	file, _ := os.Open(reply.Filename)
+	content, _ := ioutil.ReadAll (file)
+	file.Close()
+	kva := mapf(reply.Filename, string(content))
+	
+	// create the X-Y files
+	encs := []*json.Encoder{}
+	for i := 0 ; i < reply.R ; i ++ {
+		oname := FileNameXY(reply.TNum,i)
+		ofile, _ := os.Create(oname)
+		defer ofile.Close()
+		enc := json.NewEncoder(ofile)
+		encs = append(encs,enc)
+	}
+	// fill the X-Y files
+	for _, kv := range kva {
+		h := ihash(kv.Key) % reply.R
+		encs [h].Encode(&kv)
+	}
+	FinishedTask("map",reply.TNum)
+}
+func ApplyReduce (reducef func (string, []string ) string , reply Reply) {
+	intermediate := []KeyValue{}
+	for i:= 0 ; i < reply.M ; i ++ {
+		filename := FileNameXY(i,reply.TNum)
+		file, _ := os.Open (filename)
+		defer file.Close()
+		dec := json.NewDecoder(file)
+		for {
+			var kv KeyValue
+			if err := dec.Decode(&kv); err != nil {
+			break
+			}
+			intermediate = append(intermediate, kv)
+		}
+	}
+	sort.Sort(ByKey(intermediate))
+	oname := "mr-out-"
+	oname += strconv.Itoa(reply.TNum)
+	ofile, _ := os.Create(oname)
+	//
+	// call Reduce on each distinct key in intermediate[],
+	// and print the result to mr-out-0.
+	//
+	i := 0
+	for i < len(intermediate) {
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := reducef(intermediate[i].Key, values)
+		// this is the correct format for each line of Reduce output.
+		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+		i = j
+	}
+
+	ofile.Close()
+	FinishedTask("reduce",reply.TNum)
+}
 
 //
 // main/mrworker.go calls this function.
@@ -35,7 +122,41 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	// uncomment to send the Example RPC to the coordinator.
 	// CallExample()
+	for {
+		reply := RequestTask()
+		if reply.JobType == "map" {
+			ApplyMap(mapf,reply)
+		} else if reply.JobType == "reduce" {
+			ApplyReduce(reducef,reply)
+		} else if reply.JobType == "wait" {
+			time.Sleep(time.Second)
+		} else {
+			break
+		}
+	}
+}
 
+func RequestTask () Reply {
+	args := Args {}
+	reply := Reply{}
+	ok := call ("Coordinator.Task", &args, &reply);
+	if !ok {
+		fmt.Printf ("call failed!\n");
+	}
+	return reply
+}
+func FinishedTask (JobType string, TNum int) Reply {
+	args := Args {
+		JobType: JobType,
+		TNum: TNum,
+	}
+	reply := Reply{}
+	ok := call ("Coordinator.Upd", &args, &reply);
+	if !ok {
+		fmt.Printf ("call failed!\n");
+	}
+
+	return reply
 }
 
 //
