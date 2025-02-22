@@ -39,6 +39,8 @@ func (lk *Lock) Acquire() {
 			if err == rpc.OK {
 				return
 			}
+		} else if val == lk.value {
+			return
 		}
 		ms := 10
 		time.Sleep(time.Duration(ms) * time.Millisecond)
@@ -48,15 +50,18 @@ func (lk *Lock) Acquire() {
 
 func (lk *Lock) Release() {
 	// Your code here
+	t := 0 
 	for {
 		val , ver, _ := lk.ck.Get(lk.l)
 		// if i hold the lock, I will release it
 		if val == lk.value {
+			t = 1 
 			err := lk.ck.Put(lk.l, "", ver)
 			if err == rpc.OK {
 				return
 			}
-			panic ("should not happen")
+		} else if t == 1 {
+			return
 		}
 		ms := 10
 		time.Sleep(time.Duration(ms) * time.Millisecond)
