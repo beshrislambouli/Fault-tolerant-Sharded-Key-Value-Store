@@ -31,15 +31,17 @@ func MakeLock(ck kvtest.IKVClerk, l string) *Lock {
 
 func (lk *Lock) Acquire() {
 	// Your code here
+	t := 0 
 	for {
 		val , ver, _ := lk.ck.Get(lk.l)
 		// if no one holds the lock, I will acquire it 
 		if val == "" {
+			t = 1 
 			err := lk.ck.Put(lk.l, lk.value, ver)
 			if err == rpc.OK {
 				return
 			}
-		} else if val == lk.value {
+		} else if val == lk.value && t == 1 {
 			return
 		}
 		ms := 10
