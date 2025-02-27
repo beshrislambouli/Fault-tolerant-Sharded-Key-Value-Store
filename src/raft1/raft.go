@@ -110,12 +110,16 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 // field names must start with capital letters!
 type RequestVoteArgs struct {
 	// Your data here (3A, 3B).
+	Term int
+	CandidateId int
 }
 
 // example RequestVote RPC reply structure.
 // field names must start with capital letters!
 type RequestVoteReply struct {
 	// Your data here (3A).
+	Term int
+	VoteGranted bool
 }
 
 type AppendEntriesArgs struct {
@@ -129,21 +133,48 @@ type AppendEntriesReply struct {
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	// heartbeat
-	if args.Term < rf.CurrnetTerm {
+	if rf.CurrnetTerm > args.Term {
 		reply.Term = rf.CurrnetTerm
 		reply.Success = false
-	} else {
+		return
+	} 
+	if rf.CurrnetTerm < args.Term {
 		rf.CurrnetTerm = args.Term
-		reply.Success = true
-		rf.LastHeartBeat = time.Now()
-		// fmt.Println("server: ",rf.me,"NOW IT IS: ",rf.LastHeartBeat)
+		rf.VotedFor = -1 
+		if rf.IsLeader {
+			rf.StartFollower()
+		}
 	}
+	// rf.CurrnetTerm < || == args.Term will do this
+	reply.Success = true
+	rf.LastHeartBeat = time.Now()
+	DPrintf("server %v got heartbeat time %v",rf.me,rf.LastHeartBeat)
 
 }
 
 // example RequestVote RPC handler.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (3A, 3B).
+	if rf.CurrnetTerm > args.Term {
+		reply.Term = rf.CurrnetTerm
+		reply.VoteGranted = false
+		return
+	}
+	if rf.CurrnetTerm < args.Term {
+		rf.CurrnetTerm = args.Term
+		rf.VotedFor = -1
+		if rf.IsLeader {
+			rf.StartFollower()
+		}
+	}
+	if rf.VotedFor == -1 || rf.VotedFor == args.CandidateId {
+		rf.VotedFor = args.CandidateId
+		reply.Term = rf.CurrnetTerm
+		reply.VoteGranted = true
+	} else {
+		reply.Term = rf.CurrnetTerm
+		reply.VoteGranted = false
+	}
 }
 
 // example code to send a RequestVote RPC to a server.
@@ -240,15 +271,21 @@ func (rf *Raft) ticker() {
 	}
 }
 func (rf *Raft) heartbeat() {
+	DPrintf("SERVER %v START HEARTBEAT AT %v",rf.me,time.Now())
 	for rf.killed() == false && rf.IsLeader {
 		for server := 0 ; server < len(rf.peers) ; server ++ {
 			if server == rf.me {continue}
-			args := AppendEntriesArgs {
-				Term: rf.CurrnetTerm,
-			}
-			reply := AppendEntriesReply{}
-			rf.sendAppendEntries(server,&args,&reply)
-			// logic to check fail/success
+
+			go func(server int) {
+				args := AppendEntriesArgs {
+					Term: rf.CurrnetTerm,
+				}
+				reply := AppendEntriesReply{}
+	
+				// DPrintf("SERVER %v IS ABOUT TO SEND HEARTBEAT TO SERVER %v time %v",rf.me,server,time.Now())
+				rf.sendAppendEntries(server,&args,&reply)
+			}(server)
+			
 		}
 		ms := 100
 		time.Sleep(time.Duration(ms) * time.Millisecond)
@@ -256,41 +293,101 @@ func (rf *Raft) heartbeat() {
 }
 
 func (rf *Raft) electionTimeout() {
-	// for rf.killed() == false && rf.IsLeader == false {
-	// 	// fmt.Println ("server: ", rf.me, "current time:",time.Now(),"timeout:",rf.NextElectionTimeout)
-	// 	if time.Now().Before(rf.NextElectionTimeout) {
-	// 		time.Sleep(rf.NextElectionTimeout.Sub(time.Now())) //sleep until then
-	// 		continue // maybe NextElectionTimeout changed
-	// 	}
-	// 	rf.IsLeader = true // just to fail the test
-	// }
+	DPrintf("SERVER %v START ELECTIONTIMEOUT AT %v",rf.me,time.Now())
 	for  {
 		start := time.Now()
 		ms := 1500 + (rand.Int63() % 1500)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 
 		if rf.killed() || rf.IsLeader {break}
-		// fmt.Println("Server: ", rf.me, "Start: ",start,"lastheartbeat:",rf.LastHeartBeat)
+		DPrintf("Server: %v Start: %v lastheartbeat: %v", rf.me,start,rf.LastHeartBeat)
 		if rf.LastHeartBeat.After(start) {continue}
 
-		rf.IsLeader = true
+		
+		rf.StartCandidate()
+		return
+	}
+}
+
+func (rf *Raft) candidate() {
+	DPrintf("SERVER %v START CANDIDATE AT %v",rf.me,time.Now())
+	rf.CurrnetTerm ++
+	rf.VotedFor = rf.me
+	
+	NumVotes := 1 
+	var mu sync.Mutex // to proted NumVotes
+	var wg sync.WaitGroup // to know when all the go routines finished
+	doneCh := make(chan struct{}) // Channel to signal early termination
+	var once sync.Once            // Ensures `doneCh` is closed only once
+	closeChannel := func() {
+        close(doneCh)
+    }
+
+	for server := 0 ; server < len(rf.peers) ; server ++ {
+		if server == rf.me {continue}
+
+		wg.Add(1)
+
+		go func(server int) {
+			defer wg.Done()
+
+			args := RequestVoteArgs {
+				Term: rf.CurrnetTerm,
+				CandidateId: rf.me,
+			}
+			reply := RequestVoteReply{}
+			ok := rf.sendRequestVote(server,&args,&reply)
+			if !ok {
+				DPrintf("Server %v couldn't reach server %v",rf.me,server)
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			DPrintf("server %v got vote %v from server %v\n",rf.me,reply.VoteGranted,server)
+			if reply.Term > rf.CurrnetTerm {
+				DPrintf("server %v with term %v convert to follower since server %v has term %v",rf.me,rf.CurrnetTerm,server,reply.Term)
+				NumVotes = -len(rf.peers) // to force converting to follower
+				rf.CurrnetTerm = reply.Term
+				return
+			}
+			if reply.VoteGranted {
+				NumVotes++
+				if NumVotes >= len(rf.peers)/2+1 {
+					once.Do(closeChannel) // Close `doneCh` early
+				}
+			}
+		}(server)
+	}
+
+	go func() {
+		wg.Wait()
+		once.Do(closeChannel) // Close `doneCh` when all goroutines finish
+	}()
+	
+	<-doneCh // Block until either majority is reached or all goroutines finish
+
+	DPrintf("server %v has %v votes and needs %v",rf.me,NumVotes,len(rf.peers)/2 + 1)
+	if NumVotes >= len(rf.peers)/2 + 1 {
+		rf.StartLeader()
+	} else {
+		rf.StartFollower()
 	}
 }
 
 
-// func NextTimeout() time.Time {
-// 	randomDuration := time.Duration(rand.Intn(1500)) * time.Millisecond
-// 	return time.Now().Add (1500*time.Millisecond + randomDuration)
-// }
-
 func (rf *Raft) StartLeader() {
+	rf.IsLeader = true
 	go rf.heartbeat()
 }
 
 func (rf *Raft) StartFollower() {
-	// rf.NextElectionTimeout = NextTimeout()
-	rf.LastHeartBeat = time.Now().Add(1500*time.Millisecond) //just first time
-	go rf.electionTimeout ()
+	rf.IsLeader = false
+	go rf.electionTimeout()
+}
+
+func (rf *Raft) StartCandidate() {
+	rf.IsLeader = false
+	go rf.candidate()
 }
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
