@@ -31,17 +31,22 @@ type Raft struct {
 	// Your data here (3A, 3B, 3C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
-
+	IsLeader bool
+	CurrnetTerm int
+	VotedFor int
+	
+	// NextElectionTimeout time.Time
+	LastHeartBeat time.Time
 }
 
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
 
-	var term int
-	var isleader bool
+	// var term int
+	// var isleader bool
 	// Your code here (3A).
-	return term, isleader
+	return rf.CurrnetTerm, rf.IsLeader
 }
 
 // save Raft's persistent state to stable storage,
@@ -113,6 +118,29 @@ type RequestVoteReply struct {
 	// Your data here (3A).
 }
 
+type AppendEntriesArgs struct {
+	Term int
+}
+
+type AppendEntriesReply struct {
+	Term int
+	Success bool
+}
+
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	// heartbeat
+	if args.Term < rf.CurrnetTerm {
+		reply.Term = rf.CurrnetTerm
+		reply.Success = false
+	} else {
+		rf.CurrnetTerm = args.Term
+		reply.Success = true
+		rf.LastHeartBeat = time.Now()
+		// fmt.Println("server: ",rf.me,"NOW IT IS: ",rf.LastHeartBeat)
+	}
+
+}
+
 // example RequestVote RPC handler.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (3A, 3B).
@@ -147,6 +175,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // the struct itself.
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
+	return ok
+}
+
+func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	return ok
 }
 
@@ -206,7 +239,59 @@ func (rf *Raft) ticker() {
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 }
+func (rf *Raft) heartbeat() {
+	for rf.killed() == false && rf.IsLeader {
+		for server := 0 ; server < len(rf.peers) ; server ++ {
+			if server == rf.me {continue}
+			args := AppendEntriesArgs {
+				Term: rf.CurrnetTerm,
+			}
+			reply := AppendEntriesReply{}
+			rf.sendAppendEntries(server,&args,&reply)
+			// logic to check fail/success
+		}
+		ms := 100
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+	}
+}
 
+func (rf *Raft) electionTimeout() {
+	// for rf.killed() == false && rf.IsLeader == false {
+	// 	// fmt.Println ("server: ", rf.me, "current time:",time.Now(),"timeout:",rf.NextElectionTimeout)
+	// 	if time.Now().Before(rf.NextElectionTimeout) {
+	// 		time.Sleep(rf.NextElectionTimeout.Sub(time.Now())) //sleep until then
+	// 		continue // maybe NextElectionTimeout changed
+	// 	}
+	// 	rf.IsLeader = true // just to fail the test
+	// }
+	for  {
+		start := time.Now()
+		ms := 1500 + (rand.Int63() % 1500)
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+
+		if rf.killed() || rf.IsLeader {break}
+		// fmt.Println("Server: ", rf.me, "Start: ",start,"lastheartbeat:",rf.LastHeartBeat)
+		if rf.LastHeartBeat.After(start) {continue}
+
+		rf.IsLeader = true
+	}
+}
+
+
+// func NextTimeout() time.Time {
+// 	randomDuration := time.Duration(rand.Intn(1500)) * time.Millisecond
+// 	return time.Now().Add (1500*time.Millisecond + randomDuration)
+// }
+
+func (rf *Raft) StartLeader() {
+	go rf.heartbeat()
+}
+
+func (rf *Raft) StartFollower() {
+	// rf.NextElectionTimeout = NextTimeout()
+	rf.LastHeartBeat = time.Now().Add(1500*time.Millisecond) //just first time
+	go rf.electionTimeout ()
+}
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
 // server's port is peers[me]. all the servers' peers[] arrays
@@ -222,7 +307,15 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
-
+	rf.IsLeader = me == 0
+	rf.CurrnetTerm = 1
+	rf.VotedFor = -1
+	
+	if rf.IsLeader {
+		rf.StartLeader()
+	} else {
+		rf.StartFollower()
+	}
 	// Your initialization code here (3A, 3B, 3C).
 
 	// initialize from state persisted before a crash
