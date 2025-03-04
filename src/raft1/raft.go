@@ -37,6 +37,16 @@ type Raft struct {
 	
 	// NextElectionTimeout time.Time
 	LastHeartBeat time.Time
+
+	log []interface{}
+	logTerm []int
+	applyCh chan raftapi.ApplyMsg
+
+	CommitIndex int
+	LastApplied int
+
+	NextIndex  []int
+	MatchIndex []int
 }
 
 // return currentTerm and whether this server
@@ -124,6 +134,11 @@ type RequestVoteReply struct {
 
 type AppendEntriesArgs struct {
 	Term int
+	Entries []interface{}
+	LeaderCommit int
+	EntriesTerm []int
+	PrevLogIndex int
+	PrevLogTerm int
 }
 
 type AppendEntriesReply struct {
@@ -132,7 +147,8 @@ type AppendEntriesReply struct {
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	// heartbeat
+
+
 	if rf.CurrnetTerm > args.Term {
 		reply.Term = rf.CurrnetTerm
 		reply.Success = false
@@ -146,9 +162,39 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 	}
 	// rf.CurrnetTerm < || == args.Term will do this
-	reply.Success = true
+	// reply.Success = true
 	rf.LastHeartBeat = time.Now()
-	DPrintf("server %v got heartbeat time %v",rf.me,rf.LastHeartBeat)
+
+	
+
+	for args.PrevLogIndex+1 < len (rf.log) {
+		rf.log = rf.log[:len(rf.log)-1]
+		rf.logTerm = rf.logTerm[:len(rf.logTerm)-1]
+	}
+	
+	if args.PrevLogIndex != len(rf.log) - 1 || args.PrevLogTerm != rf.logTerm[len(rf.logTerm)-1] {
+		reply.Term = rf.CurrnetTerm
+		reply.Success = false
+		return
+	}
+
+	reply.Term = rf.CurrnetTerm
+	reply.Success = true
+
+	if len(args.Entries) > 0 { // not heartbeat
+		rf.log = append (rf.log,args.Entries[0])
+		rf.logTerm = append(rf.logTerm, args.EntriesTerm[0])
+	}
+
+
+	if args.LeaderCommit > rf.CommitIndex {
+		newCommitIndex := args.LeaderCommit
+		if newCommitIndex > len(rf.log) - 1 {
+			newCommitIndex = len(rf.log) - 1
+		}
+		rf.CommitIndex = newCommitIndex
+		rf.applyLog()
+	}
 
 }
 
@@ -228,16 +274,136 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 // term. the third return value is true if this server believes it is
 // the leader.
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
+	if !rf.IsLeader {
+		return -1,-1,false
+	}
+
+	index := len(rf.log)
+	term := rf.CurrnetTerm
 	isLeader := true
-
-	// Your code here (3B).
-
-
+	rf.log = append (rf.log,command)
+	rf.logTerm = append (rf.logTerm,rf.CurrnetTerm)
 	return index, term, isLeader
 }
 
+func (rf *Raft) applyCmd(index int) {
+	msg := raftapi.ApplyMsg {
+		CommandValid: true,
+		Command: rf.log[index],
+		CommandIndex: index,
+	}
+	rf.applyCh <- msg
+
+}
+
+func (rf *Raft) applyLog() {
+	for rf.CommitIndex > rf.LastApplied {
+		rf.LastApplied ++ 
+		rf.applyCmd(rf.LastApplied)
+	}
+}
+// func (rf *Raft) replicate(index int) {
+// 	NumReplicated := 1
+// 	var mu sync.Mutex // to protect NumReplicated
+// 	var wg sync.WaitGroup // to know when all the go routines finish
+// 	doneCh := make(chan struct{}) // Channel to signal early termination
+// 	var once sync.Once            // Ensures `doneCh` is closed only once
+// 	closeChannel := func() {
+//         close(doneCh)
+//     }
+
+// 	for server := 0 ; server < len(rf.peers) ; server ++ {
+// 		if server == rf.me {continue}
+// 		wg.Add(1)
+// 		go func (server , index int) {
+// 			defer wg.Done()
+
+// 			args := AppendEntriesArgs{
+// 				Term: rf.CurrnetTerm,
+// 				Entries: []interface{}{rf.log[index]},
+// 				LeaderCommit: rf.CommitIndex,
+// 			}
+// 			reply := AppendEntriesReply{}
+// 			ok := rf.sendAppendEntries(server,&args,&reply)
+// 			if ok {
+// 				mu.Lock()
+// 				defer mu.Unlock()
+// 				NumReplicated ++
+// 				if NumReplicated >= len(rf.peers)/2 + 1 {
+// 					once.Do(closeChannel)
+// 				}
+// 			}
+// 		}(server,index)
+// 	}
+
+// 	go func() {
+// 		wg.Wait()
+// 		once.Do(closeChannel) // Close `doneCh` when all goroutines finish
+// 	}()
+
+// 	<-doneCh
+
+// 	if NumReplicated >= len(rf.peers) / 2 + 1 {
+// 		rf.CommitIndex = index
+// 		rf.applyLog()
+// 	}
+// }
+func (rf *Raft) commit() {
+	for rf.killed() == false && rf.IsLeader {
+
+		if len(rf.log) > rf.CommitIndex + 1 {
+			newCommitIndex := rf.CommitIndex + 1
+			NumReplicated  := 1
+			for server := 0 ; server < len(rf.peers) ; server ++ {
+				if server == rf.me {continue}
+				if rf.MatchIndex[server] >= newCommitIndex {
+					NumReplicated ++
+				}
+			}
+			if NumReplicated >= len(rf.peers)/2 + 1 && rf.logTerm [newCommitIndex] == rf.CurrnetTerm {
+				rf.CommitIndex = newCommitIndex
+				rf.applyLog()
+			}
+		}
+		ms := 10
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+	}
+}
+func (rf *Raft) replicate(server int) {
+	for rf.killed() == false && rf.IsLeader {
+
+		if len(rf.log) > rf.NextIndex[server] {
+			args := AppendEntriesArgs {
+				Term: rf.CurrnetTerm,
+				Entries: []interface{}{rf.log[rf.NextIndex[server]]},
+				EntriesTerm: []int{rf.logTerm[rf.NextIndex[server]]},
+				LeaderCommit: rf.CommitIndex,
+				PrevLogIndex: rf.NextIndex[server]-1,
+				PrevLogTerm: rf.logTerm[rf.NextIndex[server]-1],
+			}
+			reply := AppendEntriesReply{}
+			ok := rf.sendAppendEntries(server,&args,&reply)
+			if ok {
+				if reply.Success {
+					rf.MatchIndex[server] = rf.NextIndex [server]
+					rf.NextIndex [server] ++
+				} else if reply.Term != rf.CurrnetTerm {
+					rf.StartFollower()
+				} else {
+					if rf.NextIndex [server] == 1 {
+						DPrintf("XXX %v %v",rf.NextIndex[server]-1,rf.logTerm[rf.NextIndex[server]-1])
+					}
+					rf.NextIndex [server] -- 
+					continue // to not wait 10ms
+				}
+			}
+		}
+		
+		ms := 10
+		time.Sleep(time.Duration(ms) * time.Millisecond) // TODO use cond var
+
+	}
+}
 // the tester doesn't halt goroutines created by Raft after each test,
 // but it does call the Kill() method. your code can use killed() to
 // check whether Kill() has been called. the use of atomic avoids the
@@ -279,15 +445,25 @@ func (rf *Raft) heartbeat() {
 			go func(server int) {
 				args := AppendEntriesArgs {
 					Term: rf.CurrnetTerm,
+					// Entries: empty
+					// EntriesTerm empty
+					LeaderCommit: rf.CommitIndex,
+					PrevLogIndex: rf.NextIndex[server]-1, // TODO CHECK THIS IS TRUE
+					PrevLogTerm:  rf.logTerm[rf.NextIndex[server]-1],
 				}
 				reply := AppendEntriesReply{}
 	
 				// DPrintf("SERVER %v IS ABOUT TO SEND HEARTBEAT TO SERVER %v time %v",rf.me,server,time.Now())
-				rf.sendAppendEntries(server,&args,&reply)
+				ok := rf.sendAppendEntries(server,&args,&reply)
+				if ok {
+					if !reply.Success && reply.Term != rf.CurrnetTerm {
+						rf.StartFollower()
+					}
+				}
 			}(server)
 			
 		}
-		ms := 100
+		ms := 100 // TODO think about this numbers again
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 }
@@ -296,7 +472,7 @@ func (rf *Raft) electionTimeout() {
 	DPrintf("SERVER %v START ELECTIONTIMEOUT AT %v",rf.me,time.Now())
 	for  {
 		start := time.Now()
-		ms := 1500 + (rand.Int63() % 1500)
+		ms := 1500 + (rand.Int63() % 1500) // TODO think about this numbers again and maybe consider moving this to top to sleep once and then have a clean for loop
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 
 		if rf.killed() || rf.IsLeader {break}
@@ -315,7 +491,7 @@ func (rf *Raft) candidate() {
 	rf.VotedFor = rf.me
 	
 	NumVotes := 1 
-	var mu sync.Mutex // to proted NumVotes
+	var mu sync.Mutex // to protecd NumVotes
 	var wg sync.WaitGroup // to know when all the go routines finished
 	doneCh := make(chan struct{}) // Channel to signal early termination
 	var once sync.Once            // Ensures `doneCh` is closed only once
@@ -377,7 +553,18 @@ func (rf *Raft) candidate() {
 
 func (rf *Raft) StartLeader() {
 	rf.IsLeader = true
+	//init nextindex and matchindex 
+	for server := 0 ; server < len(rf.peers) ; server ++ {
+		if server == rf.me {continue}
+		rf.NextIndex [server] = len(rf.log)
+		rf.MatchIndex[server] = 0 
+	}
 	go rf.heartbeat()
+	go rf.commit()
+	for server := 0 ; server < len(rf.peers) ; server ++ {
+		if server == rf.me {continue}
+		go rf.replicate(server)
+	}
 }
 
 func (rf *Raft) StartFollower() {
@@ -407,7 +594,17 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.IsLeader = me == 0
 	rf.CurrnetTerm = 1
 	rf.VotedFor = -1
+	rf.applyCh = applyCh
+	rf.log = append(rf.log, "$") //placeholder to start index from 1 
+	rf.logTerm = append (rf.logTerm,0)
+	rf.CommitIndex = 0
+	rf.LastApplied = 0
 	
+	for server := 0 ; server < len(rf.peers) ; server ++ {
+		rf.NextIndex = append(rf.NextIndex, 0)
+		rf.MatchIndex = append(rf.MatchIndex, 0)
+	}
+
 	if rf.IsLeader {
 		rf.StartLeader()
 	} else {
