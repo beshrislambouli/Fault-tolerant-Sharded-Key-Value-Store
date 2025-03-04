@@ -122,6 +122,9 @@ type RequestVoteArgs struct {
 	// Your data here (3A, 3B).
 	Term int
 	CandidateId int
+	// TODO add lastlog index and lastlog term !!
+	LastLogIndex int
+	LastLogTerm  int
 }
 
 // example RequestVote RPC reply structure.
@@ -135,8 +138,8 @@ type RequestVoteReply struct {
 type AppendEntriesArgs struct {
 	Term int
 	Entries []interface{}
-	LeaderCommit int
 	EntriesTerm []int
+	LeaderCommit int
 	PrevLogIndex int
 	PrevLogTerm int
 }
@@ -165,9 +168,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// reply.Success = true
 	rf.LastHeartBeat = time.Now()
 
-	
-
-	for args.PrevLogIndex+1 < len (rf.log) {
+	for args.PrevLogIndex+1 < len (rf.log) { // TODO: does the term matter here?
 		rf.log = rf.log[:len(rf.log)-1]
 		rf.logTerm = rf.logTerm[:len(rf.logTerm)-1]
 	}
@@ -181,7 +182,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Term = rf.CurrnetTerm
 	reply.Success = true
 
-	if len(args.Entries) > 0 { // not heartbeat
+	if len(args.Entries) > 0 { // TODO: paper says append if not in log already! what does that mean? shouldn't always this be true??
 		rf.log = append (rf.log,args.Entries[0])
 		rf.logTerm = append(rf.logTerm, args.EntriesTerm[0])
 	}
@@ -213,7 +214,15 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			rf.StartFollower()
 		}
 	}
-	if rf.VotedFor == -1 || rf.VotedFor == args.CandidateId {
+	up_to_date := false;
+	if args.LastLogTerm > rf.logTerm[len(rf.logTerm)-1] {
+		up_to_date = true
+	} else if args.LastLogTerm == rf.logTerm[len(rf.logTerm)-1] && args.LastLogIndex >= len(rf.log)-1 {
+		up_to_date = true
+	}
+	
+	// TODO UP TO DATE ?????
+	if up_to_date && ( rf.VotedFor == -1 || rf.VotedFor == args.CandidateId ){
 		rf.VotedFor = args.CandidateId
 		reply.Term = rf.CurrnetTerm
 		reply.VoteGranted = true
@@ -302,52 +311,7 @@ func (rf *Raft) applyLog() {
 		rf.applyCmd(rf.LastApplied)
 	}
 }
-// func (rf *Raft) replicate(index int) {
-// 	NumReplicated := 1
-// 	var mu sync.Mutex // to protect NumReplicated
-// 	var wg sync.WaitGroup // to know when all the go routines finish
-// 	doneCh := make(chan struct{}) // Channel to signal early termination
-// 	var once sync.Once            // Ensures `doneCh` is closed only once
-// 	closeChannel := func() {
-//         close(doneCh)
-//     }
 
-// 	for server := 0 ; server < len(rf.peers) ; server ++ {
-// 		if server == rf.me {continue}
-// 		wg.Add(1)
-// 		go func (server , index int) {
-// 			defer wg.Done()
-
-// 			args := AppendEntriesArgs{
-// 				Term: rf.CurrnetTerm,
-// 				Entries: []interface{}{rf.log[index]},
-// 				LeaderCommit: rf.CommitIndex,
-// 			}
-// 			reply := AppendEntriesReply{}
-// 			ok := rf.sendAppendEntries(server,&args,&reply)
-// 			if ok {
-// 				mu.Lock()
-// 				defer mu.Unlock()
-// 				NumReplicated ++
-// 				if NumReplicated >= len(rf.peers)/2 + 1 {
-// 					once.Do(closeChannel)
-// 				}
-// 			}
-// 		}(server,index)
-// 	}
-
-// 	go func() {
-// 		wg.Wait()
-// 		once.Do(closeChannel) // Close `doneCh` when all goroutines finish
-// 	}()
-
-// 	<-doneCh
-
-// 	if NumReplicated >= len(rf.peers) / 2 + 1 {
-// 		rf.CommitIndex = index
-// 		rf.applyLog()
-// 	}
-// }
 func (rf *Raft) commit() {
 	for rf.killed() == false && rf.IsLeader {
 
@@ -388,6 +352,8 @@ func (rf *Raft) replicate(server int) {
 					rf.MatchIndex[server] = rf.NextIndex [server]
 					rf.NextIndex [server] ++
 				} else if reply.Term != rf.CurrnetTerm {
+					rf.CurrnetTerm = reply.Term
+					rf.VotedFor = -1
 					rf.StartFollower()
 				} else {
 					if rf.NextIndex [server] == 1 {
@@ -437,7 +403,6 @@ func (rf *Raft) ticker() {
 	}
 }
 func (rf *Raft) heartbeat() {
-	DPrintf("SERVER %v START HEARTBEAT AT %v",rf.me,time.Now())
 	for rf.killed() == false && rf.IsLeader {
 		for server := 0 ; server < len(rf.peers) ; server ++ {
 			if server == rf.me {continue}
@@ -448,15 +413,16 @@ func (rf *Raft) heartbeat() {
 					// Entries: empty
 					// EntriesTerm empty
 					LeaderCommit: rf.CommitIndex,
-					PrevLogIndex: rf.NextIndex[server]-1, // TODO CHECK THIS IS TRUE
-					PrevLogTerm:  rf.logTerm[rf.NextIndex[server]-1],
+					PrevLogIndex: len(rf.log)-1,
+					PrevLogTerm:  rf.logTerm[len(rf.log)-1],
 				}
 				reply := AppendEntriesReply{}
 	
-				// DPrintf("SERVER %v IS ABOUT TO SEND HEARTBEAT TO SERVER %v time %v",rf.me,server,time.Now())
 				ok := rf.sendAppendEntries(server,&args,&reply)
 				if ok {
 					if !reply.Success && reply.Term != rf.CurrnetTerm {
+						rf.CurrnetTerm = reply.Term
+						rf.VotedFor = -1
 						rf.StartFollower()
 					}
 				}
@@ -510,6 +476,8 @@ func (rf *Raft) candidate() {
 			args := RequestVoteArgs {
 				Term: rf.CurrnetTerm,
 				CandidateId: rf.me,
+				LastLogIndex: len(rf.log)-1,
+				LastLogTerm: rf.logTerm[len(rf.log)-1],
 			}
 			reply := RequestVoteReply{}
 			ok := rf.sendRequestVote(server,&args,&reply)
@@ -567,12 +535,12 @@ func (rf *Raft) StartLeader() {
 	}
 }
 
-func (rf *Raft) StartFollower() {
+func (rf *Raft) StartFollower() { // todo, should i edit the voting?
 	rf.IsLeader = false
 	go rf.electionTimeout()
 }
 
-func (rf *Raft) StartCandidate() {
+func (rf *Raft) StartCandidate() { // todo, should i edit the voting?
 	rf.IsLeader = false
 	go rf.candidate()
 }
@@ -600,6 +568,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.CommitIndex = 0
 	rf.LastApplied = 0
 	
+	// just place holders
 	for server := 0 ; server < len(rf.peers) ; server ++ {
 		rf.NextIndex = append(rf.NextIndex, 0)
 		rf.MatchIndex = append(rf.MatchIndex, 0)
@@ -616,7 +585,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.readPersist(persister.ReadRaftState())
 
 	// start ticker goroutine to start elections
-	go rf.ticker()
+	// go rf.ticker()
 
 
 	return rf
