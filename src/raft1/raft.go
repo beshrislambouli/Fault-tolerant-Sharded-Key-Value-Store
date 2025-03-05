@@ -122,7 +122,6 @@ type RequestVoteArgs struct {
 	// Your data here (3A, 3B).
 	Term int
 	CandidateId int
-	// TODO add lastlog index and lastlog term !!
 	LastLogIndex int
 	LastLogTerm  int
 }
@@ -221,7 +220,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		up_to_date = true
 	}
 	
-	// TODO UP TO DATE ?????
+
 	if up_to_date && ( rf.VotedFor == -1 || rf.VotedFor == args.CandidateId ){
 		rf.VotedFor = args.CandidateId
 		reply.Term = rf.CurrnetTerm
@@ -420,7 +419,7 @@ func (rf *Raft) heartbeat() {
 	
 				ok := rf.sendAppendEntries(server,&args,&reply)
 				if ok {
-					if !reply.Success && reply.Term != rf.CurrnetTerm {
+					if !reply.Success && reply.Term > rf.CurrnetTerm {
 						rf.CurrnetTerm = reply.Term
 						rf.VotedFor = -1
 						rf.StartFollower()
@@ -492,6 +491,7 @@ func (rf *Raft) candidate() {
 				DPrintf("server %v with term %v convert to follower since server %v has term %v",rf.me,rf.CurrnetTerm,server,reply.Term)
 				NumVotes = -len(rf.peers) // to force converting to follower
 				rf.CurrnetTerm = reply.Term
+				rf.VotedFor = -1;
 				return
 			}
 			if reply.VoteGranted {
