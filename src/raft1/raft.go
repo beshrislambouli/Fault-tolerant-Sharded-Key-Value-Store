@@ -119,7 +119,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	} 
 
 	rf.checkTerm(args.Term)
-	
+
 	if (len(rf.logTerm) <= args.PrevLogIndex) || ( rf.logTerm[args.PrevLogIndex] != args.PrevLogTerm ) {
 		reply.Success = false;
 		return
@@ -156,6 +156,7 @@ func (rf *Raft) StartLeader() {
 	rf.IsLeader = true
 	rf.IsCandidate = false
 	for server := 0 ; server < len(rf.peers) ; server ++ {
+		if server == rf.me {continue}
 		rf.NextIndex [server] = len(rf.log)
 		rf.MatchIndex[server] = 0
 	}
@@ -268,10 +269,9 @@ func (rf *Raft) heartbeat() {
 				if !ok {return}
 				if rf.checkTerm(reply.Term) < 0 {return}
 			}(server)
-
-			ms := 100
-			time.Sleep(time.Duration(ms) * time.Millisecond)
 		}
+		ms := 100
+		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 }
 
@@ -293,7 +293,7 @@ func (rf *Raft) electionTimeout() {
 		DPrintf("Server: %v Start: %v lastheartbeat: %v", rf.me,start,rf.LastHeartBeat)
 		if rf.LastHeartBeat.After(start) {continue}
 
-		
+
 		rf.StartCandidate()
 		return
 	}
