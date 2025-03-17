@@ -79,14 +79,15 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if rf.CurrnetTerm < args.Term {
-		rf.StartFollower(args.Term)
-	}
-
+	
 	if rf.CurrnetTerm > args.Term {
 		reply.VoteGranted = false
 		reply.Term = rf.CurrnetTerm
 		return
+	}
+
+	if rf.CurrnetTerm < args.Term {
+		rf.StartFollower(args.Term)
 	}
 	
 
@@ -282,7 +283,7 @@ func (rf *Raft) StartFollower(nTerm int) { // todo, should i edit the voting?
 func (rf *Raft) electionTimeout() {
 	for !rf.killed() {
 		start := time.Now()
-		ms := 300 + (rand.Int63() % 1)
+		ms := 50 + (rand.Int63() % 300)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 
 		rf.mu.Lock()
@@ -399,7 +400,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
-
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	// var term int
 	// var isleader bool
 	// Your code here (3A).
@@ -509,9 +511,8 @@ func (rf *Raft) sendVote(server int) bool {
 
 	rf.mu.Unlock()
 
-	ok := rf.sendRequestVote(server,&args,&reply)
+	rf.sendRequestVote(server,&args,&reply)
 	
-	if !ok {return false}
 	return reply.VoteGranted
 }
 
