@@ -282,8 +282,10 @@ func (rf *Raft) StartFollower(nTerm int) { // todo, should i edit the voting?
 
 func (rf *Raft) electionTimeout() {
 	for !rf.killed() {
+		rand.Seed(time.Now().UnixNano())
+
 		start := time.Now()
-		ms := 50 + (rand.Int63() % 300)
+		ms := 300 + (rand.Int63() % 2)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 
 		rf.mu.Lock()
