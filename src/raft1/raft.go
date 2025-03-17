@@ -8,12 +8,14 @@ package raft
 
 import (
 	//	"bytes"
+	"bytes"
 	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	// "6.5840/labgob"
+	"6.5840/labgob"
 	"6.5840/labrpc"
 	"6.5840/raftapi"
 	"6.5840/tester1"
@@ -98,6 +100,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	if up_to_date && ( rf.VotedFor == -1 || rf.VotedFor == args.CandidateId ){
 		rf.VotedFor = args.CandidateId
+		rf.persist()
 		reply.VoteGranted = true
 		reply.Term = rf.CurrnetTerm
 	} else {
@@ -155,6 +158,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.CommitIndex = min (args.LeaderCommit,len(rf.log)-1)
 	}
 	
+	rf.persist()
 }
 
 
@@ -199,6 +203,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := true
 
 	rf.log = append (rf.log, Entry{command,term,index})
+	rf.persist()
 
 	for server := 0 ; server < len(rf.peers) ; server ++ { 
 		if server == rf.me {continue}
@@ -271,6 +276,7 @@ func (rf *Raft) StartFollower(nTerm int) { // todo, should i edit the voting?
 	rf.VotedFor = -1
 
 	rf.LastHeartBeat = time.Now()
+	rf.persist()
 }
 
 func (rf *Raft) electionTimeout() {
@@ -302,6 +308,7 @@ func (rf *Raft) StartCandidate() { // todo, should i edit the voting?
 	rf.VotedFor = rf.me
 
 	rf.LastHeartBeat = time.Now()
+	rf.persist()
 }
 
 func (rf *Raft) candidate() {
@@ -369,15 +376,16 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		rf.MatchIndex = append(rf.MatchIndex, 0)
 	}
 
-	if me == 0 {
-		rf.StartLeader()
-	} else {
-		rf.StartFollower(1)
-	}
+	// if me == 0 {
+	// 	rf.StartLeader()
+	// } else {
+	// 	rf.StartFollower(1)
+	// }
 	// Your initialization code here (3A, 3B, 3C).
 
 	// initialize from state persisted before a crash
-	// rf.readPersist(persister.ReadRaftState())
+	rf.readPersist(persister.ReadRaftState())
+	DPrintf("CurrentTerm %v votedfor %v log %v",rf.CurrnetTerm,rf.VotedFor,rf.log)
 
 	// start ticker goroutine to start elections
 	// go rf.ticker()
@@ -408,12 +416,13 @@ func (rf *Raft) GetState() (int, bool) {
 func (rf *Raft) persist() {
 	// Your code here (3C).
 	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// raftstate := w.Bytes()
-	// rf.persister.Save(raftstate, nil)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.CurrnetTerm)
+	e.Encode(rf.VotedFor)
+	e.Encode(rf.log)
+	raftstate := w.Bytes()
+	rf.persister.Save(raftstate, nil)
 }
 
 
@@ -424,17 +433,22 @@ func (rf *Raft) readPersist(data []byte) {
 	}
 	// Your code here (3C).
 	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+
+	var CurrnetTerm int
+	var VotedFor int
+	var log []Entry
+
+	if d.Decode(&CurrnetTerm) != nil ||
+	   d.Decode(&VotedFor) != nil || 
+	   d.Decode(&log) != nil {
+	  panic("ERROR")
+	} else {
+	  rf.CurrnetTerm = CurrnetTerm
+	  rf.VotedFor = VotedFor
+	  rf.log = log
+	}
 }
 
 // how many bytes in Raft's persisted log?
