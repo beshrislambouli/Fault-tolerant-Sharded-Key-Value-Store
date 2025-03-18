@@ -238,7 +238,7 @@ func (rf *Raft) commit() {
 
 	newCommitIndex := rf.CommitIndex + 1
 	for !rf.killed() && rf.IsLeader {
-		if len(rf.log) >= newCommitIndex {
+		if len(rf.log) > newCommitIndex {
 			
 			NumReplicated  := 1
 			for server := 0 ; server < len(rf.peers) ; server ++ {
@@ -611,7 +611,7 @@ func (rf *Raft) applyCmd(index int) {
 func (rf *Raft) applyLog() {
 	for !rf.killed() {
 		rf.mu.Lock()
-		if rf.CommitIndex > rf.LastApplied {
+		if rf.CommitIndex > rf.LastApplied && len(rf.log) > rf.CommitIndex {
 			rf.LastApplied ++ 
 			rf.applyCmd(rf.LastApplied)
 		}
