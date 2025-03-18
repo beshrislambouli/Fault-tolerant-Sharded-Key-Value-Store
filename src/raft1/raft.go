@@ -121,6 +121,9 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term int
 	Success bool
+
+	Len int
+	ConIndex int
 }
 
 
@@ -140,8 +143,18 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.LastHeartBeat = time.Now()
 
-	if (len(rf.log) - 1 < args.PrevLogIndex) || ( args.PrevLogIndex >= 0 && rf.log[args.PrevLogIndex].Term != args.PrevLogTerm ) {
+	if (len(rf.log) - 1 < args.PrevLogIndex) {
 		reply.Success = false;
+		reply.Len = len(rf.log)
+		return
+	} else if args.PrevLogIndex >= 0 && rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		reply.Success = false;
+		for e := 0 ; e < len (rf.log) ; e ++ {
+			if rf.log[e].Term == rf.log[args.PrevLogIndex].Term {
+				reply.ConIndex = rf.log [e].Index
+				break
+			}
+		}
 		return
 	}
 	
@@ -166,13 +179,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 	}
 
-	// if len(args.Entries) > 0 {
-	// 	if args.Entries[0].Index <= len(rf.log) {
-	// 		rf.log = rf.log [:args.Entries[0].Index]
-	// 	}
-	// 	rf.log = append (rf.log, args.Entries...)
-	// }
-
 
 	if args.LeaderCommit > rf.CommitIndex {
 		rf.CommitIndex = min (args.LeaderCommit,len(rf.log)-1)
@@ -180,9 +186,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	
 	rf.persist()
 }
-
-
-
 
 // LEADER
 
@@ -586,7 +589,12 @@ func (rf *Raft) sendEntries(server int) {
 		rf.NextIndex[server] = rf.MatchIndex[server] + 1
 		rf.mu.Unlock()
 	} else {
-		rf.NextIndex[server] -- 
+		if reply.Len > 0 {
+			rf.NextIndex[server] = reply.Len
+		} else {
+			rf.NextIndex[server] = reply.ConIndex
+		}
+
 		rf.mu.Unlock()
 		rf.sendEntries(server)
 	}
