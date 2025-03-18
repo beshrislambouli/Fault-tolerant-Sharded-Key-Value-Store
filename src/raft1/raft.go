@@ -143,7 +143,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.LastHeartBeat = time.Now()
 
-	if (len(rf.log) - 1 < args.PrevLogIndex) {
+	if args.PrevLogIndex >= len(rf.log) {
 		reply.Success = false;
 		reply.Len = len(rf.log)
 		return
@@ -161,21 +161,14 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Success = true
 	
 	for _, entry := range args.Entries {
-		relativeLogIndex := entry.Index - 1 + 1 
-		if relativeLogIndex >= 0 &&
-			len(rf.log) > relativeLogIndex &&
-			rf.log[relativeLogIndex].Term != entry.Term {
-			rf.log = rf.log[:relativeLogIndex]
+		if entry.Index >= 0 && entry.Index < len(rf.log) && rf.log[entry.Index].Term != entry.Term {
+			rf.log = rf.log[:entry.Index]
 		}
 	}
 
 	for _, entry := range args.Entries {
-		newEntry := entry
-
-		relativeIndex := entry.Index
-		if relativeIndex > 0 &&
-			len(rf.log) - 1 < relativeIndex {
-			rf.log = append(rf.log, newEntry)
+		if entry.Index > 0 && len(rf.log) - 1 < entry.Index {
+			rf.log = append(rf.log, entry)
 		}
 	}
 
@@ -552,21 +545,15 @@ func (rf *Raft) sendEntries(server int) {
 		Term: rf.CurrnetTerm,
 		LeaderCommit:rf.CommitIndex,
 	}
-	// if rf.NextIndex[server] >= 1 {
-	// 	args.PrevLogIndex = rf.log[rf.NextIndex[server]-1].Index
-	// 	args.PrevLogTerm  = rf.log[rf.NextIndex[server]-1].Term
-	// 	args.Entries = rf.log[rf.NextIndex[server]:]
-	// }
 
-	relativePrevLogIndex := rf.NextIndex[server] - 1 
 
-	if relativePrevLogIndex + 1 >= 1 {
-		args.PrevLogIndex = rf.log[relativePrevLogIndex - 1 + 1 ].Index
-		args.PrevLogTerm  = rf.log[relativePrevLogIndex - 1 + 1 ].Term
+	if rf.NextIndex[server] - 1 >= 0 {
+		args.PrevLogIndex = rf.log[rf.NextIndex[server] - 1].Index
+		args.PrevLogTerm  = rf.log[rf.NextIndex[server] - 1].Term
 	}
 
-	if relativePrevLogIndex + 1 >= 0 {
-		args.Entries = rf.log[relativePrevLogIndex+1:]
+	if rf.NextIndex[server] >= 0 {
+		args.Entries = rf.log[rf.NextIndex[server]:]
 	}
 
 
