@@ -547,12 +547,12 @@ func (rf *Raft) sendEntries(server int) {
 	}
 
 
-	if rf.NextIndex[server] - 1 >= 0 {
+	if rf.NextIndex[server] - 1 < len(rf.log) && rf.NextIndex[server] - 1 >= 0 {
 		args.PrevLogIndex = rf.log[rf.NextIndex[server] - 1].Index
 		args.PrevLogTerm  = rf.log[rf.NextIndex[server] - 1].Term
 	}
 
-	if rf.NextIndex[server] >= 0 {
+	if rf.NextIndex[server] < len(rf.log) && rf.NextIndex[server] >= 0 {
 		args.Entries = rf.log[rf.NextIndex[server]:]
 	}
 
