@@ -96,10 +96,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	
 
 	up_to_date := false;
-	if args.LastLogTerm == rf.log[len(rf.log)-1].Term {
-		up_to_date = args.LastLogIndex >= rf.log[len(rf.log)-1].Index
+	LastLogIndex, LastLogTerm := rf.PrevLogEntry(len(rf.log))
+	if args.LastLogTerm == LastLogTerm {
+		up_to_date = args.LastLogIndex >= LastLogIndex
 	} else {
-		up_to_date = args.LastLogTerm >= rf.log[len(rf.log)-1].Term
+		up_to_date = args.LastLogTerm >= LastLogTerm
 	}
 
 
@@ -171,7 +172,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	for _, entry := range args.Entries {
-		if entry.Index > 0 && len(rf.log) - 1 < entry.Index {
+		if entry.Index >= 0 && len(rf.log) - 1 < entry.Index {
 			rf.log = append(rf.log, entry)
 		}
 	}
@@ -193,7 +194,7 @@ func (rf *Raft) StartLeader() {
 
 	for server := 0 ; server < len(rf.peers) ; server ++ {
 		rf.NextIndex [server] = len(rf.log)
-		rf.MatchIndex[server] = 0
+		rf.MatchIndex[server] = -1
 	}
 	go rf.heartbeat()
 	go rf.commit()
@@ -231,7 +232,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		go rf.sendEntries(server)
 	}
 	
-	return index, term, isLeader
+	return index+1, term, isLeader
 }
 
 
@@ -389,14 +390,17 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.CurrnetTerm = 1
 	rf.VotedFor = -1
 	rf.applyCh = applyCh
-	rf.log = append(rf.log, Entry{"$",0,0}) //placeholder to start index from 1 
-	rf.CommitIndex = 0
-	rf.LastApplied = 0
+	// rf.log = append(rf.log, Entry{"$",0,0}) //placeholder to start index from 1 
+	rf.LastSnapshotIndex = -1
+	rf.LastSnapshotTerm  = -1
+
+	rf.CommitIndex = -1
+	rf.LastApplied = -1
 	
 	// just place holders
 	for server := 0 ; server < len(rf.peers) ; server ++ {
 		rf.NextIndex = append(rf.NextIndex, len(rf.log))
-		rf.MatchIndex = append(rf.MatchIndex, 0)
+		rf.MatchIndex = append(rf.MatchIndex, -1)
 	}
 
 	// if me == 0 {
@@ -495,7 +499,7 @@ func (rf *Raft) PersistBytes() int {
 // all info up to and including index. this means the
 // service no longer needs the log through (and including)
 // that index. Raft should now trim its log as much as possible.
-func (rf *Raft) Snapshot(index int, snapshot []byte) {
+func (rf *Raft) Snapshot(index int, snapshot []byte) { // todo index?
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if index >= len(rf.log) {
@@ -545,9 +549,13 @@ func (rf *Raft) sendVote(server int) bool {
 	args := RequestVoteArgs{
 		Term: rf.CurrnetTerm,
 		CandidateId: rf.me,
-		LastLogIndex: rf.log[len(rf.log)-1].Index,
-		LastLogTerm: rf.log[len(rf.log)-1].Term,
+		// LastLogIndex: rf.log[len(rf.log)-1].Index,
+		// LastLogTerm: rf.log[len(rf.log)-1].Term,
+		LastLogIndex: -1,
+		LastLogTerm: -1,
 	}
+	args.LastLogIndex, args.LastLogTerm = rf.PrevLogEntry(len(rf.log))
+
 	reply := RequestVoteReply{}
 
 	rf.mu.Unlock()
@@ -566,13 +574,16 @@ func (rf *Raft) sendEntries(server int) {
 
 	args := AppendEntriesArgs{
 		Term: rf.CurrnetTerm,
-		LeaderCommit:rf.CommitIndex,
+		LeaderCommit: rf.CommitIndex,
+		PrevLogIndex: -1,
+		PrevLogTerm: -1,
 	}
 
 
 	if rf.NextIndex[server] - 1 < len(rf.log) && rf.NextIndex[server] - 1 >= 0 {
-		args.PrevLogIndex = rf.log[rf.NextIndex[server] - 1].Index
-		args.PrevLogTerm  = rf.log[rf.NextIndex[server] - 1].Term
+		// args.PrevLogIndex = rf.log[rf.NextIndex[server] - 1].Index
+		// args.PrevLogTerm  = rf.log[rf.NextIndex[server] - 1].Term
+		args.PrevLogIndex, args.PrevLogTerm = rf.PrevLogEntry(rf.NextIndex[server])
 	}
 
 	if rf.NextIndex[server] < len(rf.log) && rf.NextIndex[server] >= 0 {
@@ -625,7 +636,7 @@ func (rf *Raft) applyCmd(index int) {
 	msg := raftapi.ApplyMsg {
 		CommandValid: true,
 		Command: rf.log[index].Command,
-		CommandIndex: index,
+		CommandIndex: index+1,
 	}
 	rf.applyCh <- msg
 
@@ -643,6 +654,16 @@ func (rf *Raft) applyLog() {
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 	
+}
+
+func (rf *Raft) PrevLogEntry(index int) (int, int) {
+	if index > len(rf.log) || index < 0 {
+		panic ("ERROR PrevLogEntry")
+	}
+	if index == 0 {
+		return rf.LastSnapshotIndex, rf.LastSnapshotTerm
+	}
+	return rf.log[index-1].Index, rf.log[index-1].Term
 }
 
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
