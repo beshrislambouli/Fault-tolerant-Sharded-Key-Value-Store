@@ -54,6 +54,10 @@ type Raft struct {
 
 	NextIndex  []int
 	MatchIndex []int
+
+	CurrentSnapshot []byte
+	LastSnapshotIndex int
+	LastSnapshotTerm int
 }
 
 
@@ -404,7 +408,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
-	// DPrintf("CurrentTerm %v votedfor %v log %v",rf.CurrnetTerm,rf.VotedFor,rf.log)
 
 	// start ticker goroutine to start elections
 	// go rf.ticker()
@@ -441,6 +444,8 @@ func (rf *Raft) persist() {
 	e.Encode(rf.CurrnetTerm)
 	e.Encode(rf.VotedFor)
 	e.Encode(rf.log)
+	e.Encode(rf.LastSnapshotIndex)
+	e.Encode(rf.LastSnapshotTerm)
 	raftstate := w.Bytes()
 	rf.persister.Save(raftstate, nil)
 }
@@ -459,16 +464,23 @@ func (rf *Raft) readPersist(data []byte) {
 	var CurrnetTerm int
 	var VotedFor int
 	var log []Entry
+	var LastSnapshotIndex int
+	var LastSnapshotTerm int
 
 	if d.Decode(&CurrnetTerm) != nil ||
 	   d.Decode(&VotedFor) != nil || 
-	   d.Decode(&log) != nil {
+	   d.Decode(&log) != nil || 
+	   d.Decode(&LastSnapshotIndex) != nil ||
+	   d.Decode(&LastSnapshotTerm) != nil {
 	  panic("ERROR")
 	} else {
 	  rf.CurrnetTerm = CurrnetTerm
 	  rf.VotedFor = VotedFor
 	  rf.log = log
+	  rf.LastSnapshotIndex = LastSnapshotIndex
+	  rf.LastSnapshotTerm = LastSnapshotTerm
 	}
+	rf.CurrentSnapshot = rf.persister.ReadSnapshot()
 }
 
 // how many bytes in Raft's persisted log?
@@ -484,8 +496,19 @@ func (rf *Raft) PersistBytes() int {
 // service no longer needs the log through (and including)
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	// Your code here (3D).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if index >= len(rf.log) {
+		panic("ERROR Snapshot")
+	}
 
+	rf.CurrentSnapshot = snapshot
+	rf.LastSnapshotIndex = index
+	rf.LastSnapshotTerm = rf.log[index].Term
+
+	rf.log = rf.log [:index+1]
+
+	rf.persist()
 }
 
 
