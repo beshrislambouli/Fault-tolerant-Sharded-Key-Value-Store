@@ -132,7 +132,7 @@ type AppendEntriesReply struct {
 	ConIndex int
 }
 
-// todo
+
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -290,7 +290,7 @@ func (rf *Raft) heartbeat() {
 
 
 // FOLLOWER 
-func (rf *Raft) StartFollower(nTerm int) { // todo, should i edit the voting?
+func (rf *Raft) StartFollower(nTerm int) {
 	
 	rf.IsLeader = false
 	rf.IsCandidate = false
@@ -325,7 +325,7 @@ func (rf *Raft) electionTimeout() {
 
 // CANDIDATE 
 
-func (rf *Raft) StartCandidate() { // todo, should i edit the voting?
+func (rf *Raft) StartCandidate() {
 	rf.IsLeader = false
 	rf.IsCandidate = true
 	
@@ -489,8 +489,8 @@ func (rf *Raft) readPersist(data []byte) {
 	  rf.LastSnapshotIndex = LastSnapshotIndex
 	  rf.LastSnapshotTerm = LastSnapshotTerm
 	  rf.SnapshotLogSz = SnapshotLogSz
-	  rf.CommitIndex = rf.LastSnapshotIndex
-	  rf.LastApplied = rf.LastSnapshotIndex
+	//   rf.CommitIndex = rf.LastSnapshotIndex
+	//   rf.LastApplied = rf.LastSnapshotIndex
 	}
 	rf.CurrentSnapshot = rf.persister.ReadSnapshot()
 }
@@ -507,7 +507,7 @@ func (rf *Raft) PersistBytes() int {
 // all info up to and including index. this means the
 // service no longer needs the log through (and including)
 // that index. Raft should now trim its log as much as possible.
-func (rf *Raft) Snapshot(index int, snapshot []byte) { // todo index?
+func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
