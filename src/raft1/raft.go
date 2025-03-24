@@ -167,7 +167,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Success = true
 	
 	for _, entry := range args.Entries {
-		if entry.Index >= 0 && entry.Index < len(rf.log) + rf.SnapshotLogSz && rf.log[entry.Index-rf.SnapshotLogSz].Term != entry.Term {
+		if entry.Index - rf.SnapshotLogSz >= 0 && entry.Index < len(rf.log) + rf.SnapshotLogSz && rf.log[entry.Index-rf.SnapshotLogSz].Term != entry.Term {
 			rf.log = rf.log[:entry.Index-rf.SnapshotLogSz]
 		}
 	}
