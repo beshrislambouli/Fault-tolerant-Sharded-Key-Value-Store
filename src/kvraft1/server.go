@@ -8,8 +8,12 @@ import (
 	"6.5840/labgob"
 	"6.5840/labrpc"
 	"6.5840/tester1"
-
 )
+
+type Value struct {
+	Value string
+	Version rpc.Tversion
+}
 
 type KVServer struct {
 	me   int
@@ -17,6 +21,7 @@ type KVServer struct {
 	rsm  *rsm.RSM
 
 	// Your definitions here.
+	store map[string]Value
 }
 
 // To type-cast req to the right type, take a look at Go's type switches or type
@@ -26,7 +31,14 @@ type KVServer struct {
 // https://go.dev/tour/methods/15
 func (kv *KVServer) DoOp(req any) any {
 	// Your code here
-	return nil
+	switch args := req.(type) {
+	case rpc.GetArgs:
+		return kv.DoGet(args)
+	case rpc.PutArgs:
+		return kv.DoPut(args)
+	default:
+		panic("Not Known Request")
+	}
 }
 
 func (kv *KVServer) Snapshot() []byte {
@@ -38,16 +50,64 @@ func (kv *KVServer) Restore(data []byte) {
 	// Your code here
 }
 
+func (kv *KVServer) DoGet(args rpc.GetArgs) rpc.GetReply {
+	reply := rpc.GetReply{}
+
+	if val, ok := kv.store[args.Key]; ok {
+		reply.Value = val.Value
+		reply.Version = val.Version
+		reply.Err = rpc.OK
+ 	} else 	{
+		reply.Err = rpc.ErrNoKey
+	}
+	
+	return reply
+}
+
+func (kv *KVServer) DoPut(args rpc.PutArgs) rpc.PutReply {
+	reply := rpc.PutReply{}
+
+	if val, ok := kv.store[args.Key]; ok {
+		if val.Version == args.Version {
+			kv.store[args.Key] = Value{Value: args.Value, Version: args.Version + 1}
+			reply.Err = rpc.OK
+		} else {
+			reply.Err = rpc.ErrVersion
+		}
+	} else {
+		if args.Version == 0 {
+			kv.store[args.Key] = Value{Value: args.Value, Version: 1}
+			reply.Err = rpc.OK
+		} else {
+			reply.Err = rpc.ErrNoKey
+		}
+	}
+
+	return reply
+}
+
 func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 	// Your code here. Use kv.rsm.Submit() to submit args
 	// You can use go's type casts to turn the any return value
 	// of Submit() into a GetReply: rep.(rpc.GetReply)
+	err, res := kv.rsm.Submit(*args)
+	if err != rpc.OK {
+		reply.Err = err
+		return
+	}
+	*reply = res.(rpc.GetReply)
 }
 
 func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
 	// Your code here. Use kv.rsm.Submit() to submit args
 	// You can use go's type casts to turn the any return value
 	// of Submit() into a PutReply: rep.(rpc.PutReply)
+	err, res := kv.rsm.Submit(*args)
+	if err != rpc.OK {
+		reply.Err = err 
+		return
+	}
+	*reply = res.(rpc.PutReply)
 }
 
 // the tester calls Kill() when a KVServer instance won't
@@ -77,7 +137,10 @@ func StartKVServer(servers []*labrpc.ClientEnd, gid tester.Tgid, me int, persist
 	labgob.Register(rpc.PutArgs{})
 	labgob.Register(rpc.GetArgs{})
 
-	kv := &KVServer{me: me}
+	kv := &KVServer{
+		me: me,
+		store: make(map[string]Value),
+	}
 
 
 	kv.rsm = rsm.MakeRSM(servers, me, persister, maxraftstate, kv)
