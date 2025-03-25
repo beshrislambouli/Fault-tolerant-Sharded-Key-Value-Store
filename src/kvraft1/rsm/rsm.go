@@ -41,6 +41,11 @@ type RSM struct {
 	maxraftstate int // snapshot if log grows this big
 	sm           StateMachine
 	// Your definitions here.
+	resCh        chan any
+
+	index int
+	term int
+	isLeader bool
 }
 
 // servers[] contains the ports of the set of
@@ -64,10 +69,12 @@ func MakeRSM(servers []*labrpc.ClientEnd, me int, persister *tester.Persister, m
 		maxraftstate: maxraftstate,
 		applyCh:      make(chan raftapi.ApplyMsg),
 		sm:           sm,
+		resCh:        make(chan any),
 	}
 	if !useRaftStateMachine {
 		rsm.rf = raft.Make(servers, me, persister, rsm.applyCh)
 	}
+	go rsm.Reader()
 	return rsm
 }
 
@@ -79,12 +86,84 @@ func (rsm *RSM) Raft() raftapi.Raft {
 // Submit a command to Raft, and wait for it to be committed.  It
 // should return ErrWrongLeader if client should find new leader and
 // try again.
+// func (rsm *RSM) Submit(req any) (rpc.Err, any) {
+
+// 	// Submit creates an Op structure to run a command through Raft;
+// 	// for example: op := Op{Me: rsm.me, Id: id, Req: req}, where req
+// 	// is the argument to Submit and id is a unique id for the op.
+
+// 	// your code here
+// 	rsm.mu.Lock()
+// 	defer rsm.mu.Unlock()
+// 	_, _, leader := rsm.rf.Start(Inc{})
+// 	rsm.IsLeader = leader
+// 	rsm.currentTerm , leader = rsm.rf.GetState()
+// 	if leader != rsm.IsLeader {panic ("changed state in the middle")}
+
+
+
+// 	raft.DPrintf("Server %v is leader: %v",rsm.me,leader)
+// 	if !leader {return rpc.ErrWrongLeader, nil}
+// 	raft.DPrintf("ok i am gonna wait here")
+// 	res , valid := <- rsm.resCh
+// 	raft.DPrintf("about to send %v %v",res,valid)
+// 	if !valid || res == "LostLeadership" {
+// 		return rpc.ErrWrongLeader, nil
+// 	}
+// 	return rpc.OK, res
+// }
+
+// func (rsm *RSM) Reader() {
+// 	for replicated := range rsm.applyCh {
+// 		raft.DPrintf("Command %v",replicated)
+// 		res := rsm.sm.DoOp(replicated.Command)
+// 		_ , IsLeader := rsm.rf.GetState()
+
+// 		if rsm.IsLeader && IsLeader { // todo should i check term?
+// 			raft.DPrintf("Returning %v",res)
+// 			rsm.resCh <- res
+// 		} else if rsm.IsLeader {
+// 			rsm.resCh <- "LostLeadership"
+// 		}
+// 	}
+// 	raft.DPrintf("closing resCh")
+// 	close (rsm.resCh)
+// }
+
 func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 
 	// Submit creates an Op structure to run a command through Raft;
 	// for example: op := Op{Me: rsm.me, Id: id, Req: req}, where req
 	// is the argument to Submit and id is a unique id for the op.
 
-	// your code here
-	return rpc.ErrWrongLeader, nil // i'm dead, try another server.
+	
+	rsm.mu.Lock()
+	defer rsm.mu.Unlock()
+
+	rsm.index, rsm.term, rsm.isLeader = rsm.rf.Start(req)
+	if !rsm.isLeader {return rpc.ErrWrongLeader, nil}
+
+	res, ok := <- rsm.resCh
+	if !ok || res == "ERROR" {return rpc.ErrWrongLeader, nil}
+
+	return rpc.OK, res 
+}
+
+func (rsm *RSM) Reader() {
+	for replicated := range rsm.applyCh {
+		res := rsm.sm.DoOp(replicated.Command)
+
+		curIndex := replicated.CommandIndex
+		curTerm, curIsLeader := rsm.rf.GetState()
+
+		if curIndex < rsm.index {continue}
+		if !rsm.isLeader {continue}
+
+		if rsm.term != curTerm || !curIsLeader { 
+			rsm.resCh <- "ERROR"
+		} else {
+			rsm.resCh <- res
+		}
+	}
+	close(rsm.resCh)
 }
