@@ -35,6 +35,7 @@ type StateMachine interface {
 
 type RSM struct {
 	mu           sync.Mutex
+	muQuery		 sync.Mutex
 	me           int
 	rf           raftapi.Raft
 	applyCh      chan raftapi.ApplyMsg
@@ -93,11 +94,13 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 	// is the argument to Submit and id is a unique id for the op.
 
 	
-	rsm.mu.Lock()
-	defer rsm.mu.Unlock()
+	rsm.muQuery.Lock()
+	defer rsm.muQuery.Unlock()
 
+	rsm.mu.Lock()
 	rsm.index, rsm.term, rsm.isLeader = rsm.rf.Start(req)
-	if !rsm.isLeader {return rpc.ErrWrongLeader, nil}
+	if !rsm.isLeader {rsm.mu.Unlock(); return rpc.ErrWrongLeader, nil}
+	rsm.mu.Unlock()
 
 	res, ok := <- rsm.resCh
 	if !ok || res == "ERROR" {return rpc.ErrWrongLeader, nil}
@@ -112,12 +115,15 @@ func (rsm *RSM) Reader() {
 		curIndex := replicated.CommandIndex
 		curTerm, curIsLeader := rsm.rf.GetState()
 
-		if curIndex < rsm.index {continue}
-		if !rsm.isLeader {continue}
+		rsm.mu.Lock()
+		if curIndex < rsm.index {rsm.mu.Unlock(); continue}
+		if !rsm.isLeader {rsm.mu.Unlock(); continue}
 
 		if rsm.term != curTerm || !curIsLeader { 
+			rsm.mu.Unlock()
 			rsm.resCh <- "ERROR"
 		} else {
+			rsm.mu.Unlock()
 			rsm.resCh <- res
 		}
 	}
