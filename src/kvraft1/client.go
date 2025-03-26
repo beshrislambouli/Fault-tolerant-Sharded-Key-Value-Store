@@ -30,29 +30,25 @@ func MakeClerk(clnt *tester.Clnt, servers []string) kvtest.IKVClerk {
 // must match the declared types of the RPC handler function's
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
-
-	// You will have to modify this function.
-	for {
-		args := rpc.GetArgs {
-			Key: key,
-		}
-		reply := rpc.GetReply{}
-
-		for i := 0 ; ; i ++ {
-			i %= len(ck.servers)
-
-			ok := ck.clnt.Call(ck.servers[i], "KVServer.Get", &args, &reply)
-			if !ok {panic("Not OK")}
-			if reply.Err == rpc.ErrWrongLeader {continue}
-
-			break
-		}
-
-		if reply.Err == rpc.ErrNoKey {
-			return "", 0, reply.Err
-		}
-		return reply.Value, reply.Version, reply.Err
+	args := rpc.GetArgs {
+		Key: key,
 	}
+	reply := rpc.GetReply{}
+
+	for i := 0 ; ; i ++ {
+		i %= len(ck.servers)
+
+		ok := ck.clnt.Call(ck.servers[i], "KVServer.Get", &args, &reply)
+		if !ok {panic("Not OK")}
+		if reply.Err == rpc.ErrWrongLeader {continue}
+
+		break
+	}
+
+	if reply.Err == rpc.ErrNoKey {
+		return "", 0, reply.Err
+	}
+	return reply.Value, reply.Version, reply.Err
 }
 
 // Put updates key with value only if the version in the
@@ -73,29 +69,28 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // must match the declared types of the RPC handler function's
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
-	t := 0 
-	for {
-		t ++ 
-		args := rpc.PutArgs {
-			Key: key,
-			Value: value,
-			Version: version,
-		}
-		reply := rpc.PutReply{}
+	t := make([]int,len(ck.servers))
+	args := rpc.PutArgs {
+		Key: key,
+		Value: value,
+		Version: version,
+	}
+	reply := rpc.PutReply{}
 
-		for i := 0 ; ; i ++ {
-			i %= len(ck.servers)
+	i := 0 
+	for ; ; i ++ {
+		i %= len(ck.servers)
 
-			ok := ck.clnt.Call(ck.servers[i], "KVServer.Put", &args, &reply)
-			if !ok {panic("Not OK")}
-			if reply.Err == rpc.ErrWrongLeader {continue}
+		t [i] ++
+		ok := ck.clnt.Call(ck.servers[i], "KVServer.Put", &args, &reply)
+		if !ok {panic("Not OK")}
+		if reply.Err == rpc.ErrWrongLeader {continue}
 
-			break
-		}
+		break
+	}
 
-		if t > 1 && reply.Err == rpc.ErrVersion {
-			return rpc.ErrMaybe
-		}
-		return reply.Err
-	}	
+	if t [i] > 1 && reply.Err == rpc.ErrVersion {
+		return rpc.ErrMaybe
+	}
+	return reply.Err
 }
