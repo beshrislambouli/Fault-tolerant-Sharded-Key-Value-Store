@@ -1,6 +1,7 @@
 package kvraft
 
 import (
+	"sync/atomic"
 	"time"
 
 	"6.5840/kvsrv1/rpc"
@@ -31,27 +32,72 @@ func MakeClerk(clnt *tester.Clnt, servers []string) kvtest.IKVClerk {
 // The types of args and reply (including whether they are pointers)
 // must match the declared types of the RPC handler function's
 // arguments. Additionally, reply must be passed as a pointer.
+// func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
+// 	args := rpc.GetArgs {
+// 		Key: key,
+// 	}
+// 	reply := rpc.GetReply{}
+
+// 	for i := 0 ; ; i ++ {
+// 		time.Sleep (10 * time.Millisecond)
+// 		i %= len(ck.servers)
+
+// 		ok := ck.clnt.Call(ck.servers[i], "KVServer.Get", &args, &reply)
+// 		if !ok {continue}
+// 		if reply.Err == rpc.ErrWrongLeader {continue}
+
+// 		break
+// 	}
+
+// 	if reply.Err == rpc.ErrNoKey {
+// 		return "", 0, reply.Err
+// 	}
+// 	return reply.Value, reply.Version, reply.Err
+// }
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
-	args := rpc.GetArgs {
-		Key: key,
+
+	var done int32
+	atomic.StoreInt32(&done, 0)
+	res := rpc.GetReply{}
+
+	for i := 0 ; i < len(ck.servers) ; i ++ {
+		go func(server int) {
+
+			args := rpc.GetArgs {
+				Key: key,
+			}
+			reply := rpc.GetReply{}
+			
+			for {
+				z := atomic.LoadInt32(&done)
+				if z != 0 {return}
+
+				ok := ck.clnt.Call(ck.servers[server], "KVServer.Get", &args, &reply)
+				if !ok || reply.Err == rpc.ErrWrongLeader {
+					time.Sleep(10 * time.Millisecond)
+					continue
+				}
+				break
+			}
+			
+			z := atomic.LoadInt32(&done)
+			if z != 0 {panic("error")}
+			atomic.StoreInt32(&done, 1)
+
+			res = reply
+		}(i)
 	}
-	reply := rpc.GetReply{}
 
-	for i := 0 ; ; i ++ {
-		time.Sleep (10 * time.Millisecond)
-		i %= len(ck.servers)
-
-		ok := ck.clnt.Call(ck.servers[i], "KVServer.Get", &args, &reply)
-		if !ok {continue}
-		if reply.Err == rpc.ErrWrongLeader {continue}
-
-		break
+	for {
+		z := atomic.LoadInt32(&done)
+		if z != 0 {break}
+		time.Sleep(10 * time.Millisecond)
 	}
 
-	if reply.Err == rpc.ErrNoKey {
-		return "", 0, reply.Err
+	if res.Err == rpc.ErrNoKey {
+		return "", 0, res.Err
 	}
-	return reply.Value, reply.Version, reply.Err
+	return res.Value, res.Version, res.Err
 }
 
 // Put updates key with value only if the version in the
@@ -71,30 +117,81 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // The types of args and reply (including whether they are pointers)
 // must match the declared types of the RPC handler function's
 // arguments. Additionally, reply must be passed as a pointer.
+// func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
+// 	t := make([]int,len(ck.servers))
+// 	args := rpc.PutArgs {
+// 		Key: key,
+// 		Value: value,
+// 		Version: version,
+// 	}
+// 	reply := rpc.PutReply{}
+
+// 	i := 0 
+// 	for ; ; i ++ {
+// 		time.Sleep (10 * time.Millisecond);
+// 		i %= len(ck.servers)
+
+// 		t [i] ++
+// 		ok := ck.clnt.Call(ck.servers[i], "KVServer.Put", &args, &reply)
+// 		if !ok {continue}
+// 		if reply.Err == rpc.ErrWrongLeader { t [i] = 0; continue}
+
+// 		break
+// 	}
+
+// 	if t [i] > 1 && reply.Err == rpc.ErrVersion {
+// 		return rpc.ErrMaybe
+// 	}
+// 	return reply.Err
+// }
+
 func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 	t := make([]int,len(ck.servers))
-	args := rpc.PutArgs {
-		Key: key,
-		Value: value,
-		Version: version,
+	var leader int32
+	atomic.StoreInt32(&leader,-1)
+	res := rpc.PutReply{}
+
+	for i := 0 ; i < len(ck.servers) ; i ++ {
+		go func(server int) {
+
+			args := rpc.PutArgs {
+				Key: key,
+				Value: value,
+				Version: version,
+			}
+			reply := rpc.PutReply{}
+
+			for {
+				z := atomic.LoadInt32(&leader)
+				if z != -1 {return}
+				
+				
+				ok := ck.clnt.Call(ck.servers[server], "KVServer.Put", &args, &reply)
+				if !ok {t[server]++}
+				if !ok || reply.Err == rpc.ErrWrongLeader {
+					time.Sleep(10 * time.Millisecond)
+					continue
+				}
+				break
+			}
+
+			z := atomic.LoadInt32(&leader)
+			if z != -1 {panic("error")}
+			atomic.StoreInt32(&leader,int32(server))
+
+			res = reply
+
+		}(i)
 	}
-	reply := rpc.PutReply{}
 
-	i := 0 
-	for ; ; i ++ {
-		time.Sleep (10 * time.Millisecond);
-		i %= len(ck.servers)
-
-		t [i] ++
-		ok := ck.clnt.Call(ck.servers[i], "KVServer.Put", &args, &reply)
-		if !ok {continue}
-		if reply.Err == rpc.ErrWrongLeader { t [i] = 0; continue}
-
-		break
+	for {
+		z := atomic.LoadInt32(&leader)
+		if z != -1 {break}
+		time.Sleep(10 * time.Millisecond)
 	}
 
-	if t [i] > 1 && reply.Err == rpc.ErrVersion {
+	if t [leader] > 1 && res.Err == rpc.ErrVersion {
 		return rpc.ErrMaybe
 	}
-	return reply.Err
+	return res.Err
 }
