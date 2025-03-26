@@ -2,6 +2,7 @@ package kvraft
 
 import (
 	"sync/atomic"
+	"sync"
 
 	"6.5840/kvraft1/rsm"
 	"6.5840/kvsrv1/rpc"
@@ -22,6 +23,7 @@ type KVServer struct {
 
 	// Your definitions here.
 	store map[string]Value
+	mu sync.Mutex
 }
 
 // To type-cast req to the right type, take a look at Go's type switches or type
@@ -51,6 +53,9 @@ func (kv *KVServer) Restore(data []byte) {
 }
 
 func (kv *KVServer) DoGet(args rpc.GetArgs) rpc.GetReply {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
 	reply := rpc.GetReply{}
 
 	if val, ok := kv.store[args.Key]; ok {
@@ -65,6 +70,9 @@ func (kv *KVServer) DoGet(args rpc.GetArgs) rpc.GetReply {
 }
 
 func (kv *KVServer) DoPut(args rpc.PutArgs) rpc.PutReply {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	
 	reply := rpc.PutReply{}
 
 	if val, ok := kv.store[args.Key]; ok {
