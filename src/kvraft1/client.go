@@ -74,7 +74,7 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 
 				ok := ck.clnt.Call(ck.servers[server], "KVServer.Get", &args, &reply)
 				if !ok || reply.Err == rpc.ErrWrongLeader {
-					time.Sleep(10 * time.Millisecond)
+					time.Sleep(100 * time.Millisecond)
 					continue
 				}
 				break
@@ -82,9 +82,9 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 			
 			z := atomic.LoadInt32(&done)
 			if z != 0 {panic("error")}
+			res = reply
 			atomic.StoreInt32(&done, 1)
 
-			res = reply
 		}(i)
 	}
 
@@ -167,9 +167,9 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 				
 				
 				ok := ck.clnt.Call(ck.servers[server], "KVServer.Put", &args, &reply)
-				if !ok {t[server]++}
+				t[server]++
 				if !ok || reply.Err == rpc.ErrWrongLeader {
-					time.Sleep(10 * time.Millisecond)
+					time.Sleep(100 * time.Millisecond)
 					continue
 				}
 				break
@@ -177,9 +177,8 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 
 			z := atomic.LoadInt32(&leader)
 			if z != -1 {panic("error")}
-			atomic.StoreInt32(&leader,int32(server))
-
 			res = reply
+			atomic.StoreInt32(&leader,int32(server))
 
 		}(i)
 	}
