@@ -1,6 +1,8 @@
 package kvraft
 
 import (
+	"time"
+
 	"6.5840/kvsrv1/rpc"
 	"6.5840/kvtest1"
 	"6.5840/tester1"
@@ -36,10 +38,11 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 	reply := rpc.GetReply{}
 
 	for i := 0 ; ; i ++ {
+		time.Sleep (10 * time.Millisecond)
 		i %= len(ck.servers)
 
 		ok := ck.clnt.Call(ck.servers[i], "KVServer.Get", &args, &reply)
-		if !ok {panic("Not OK")}
+		if !ok {continue}
 		if reply.Err == rpc.ErrWrongLeader {continue}
 
 		break
@@ -79,12 +82,13 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 
 	i := 0 
 	for ; ; i ++ {
+		time.Sleep (10 * time.Millisecond);
 		i %= len(ck.servers)
 
 		t [i] ++
 		ok := ck.clnt.Call(ck.servers[i], "KVServer.Put", &args, &reply)
-		if !ok {panic("Not OK")}
-		if reply.Err == rpc.ErrWrongLeader {continue}
+		if !ok {continue}
+		if reply.Err == rpc.ErrWrongLeader { t [i] = 0; continue}
 
 		break
 	}
