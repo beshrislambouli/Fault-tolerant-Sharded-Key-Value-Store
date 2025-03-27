@@ -552,7 +552,7 @@ func (rf *Raft) initiateElection() {
 		rf.convertToLeader()
 
 		rf.mu.Unlock()
-
+		rf.Start("PUSH")
 		rf.sendHeartbeatsToFollowers()
 	} else {
 		rf.mu.Unlock()

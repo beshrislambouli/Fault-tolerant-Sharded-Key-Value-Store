@@ -1,13 +1,15 @@
 package kvraft
 
 import (
-	"sync/atomic"
+	"bytes"
 	"sync"
+	"sync/atomic"
 
 	"6.5840/kvraft1/rsm"
 	"6.5840/kvsrv1/rpc"
 	"6.5840/labgob"
 	"6.5840/labrpc"
+	raft "6.5840/raft1"
 	"6.5840/tester1"
 )
 
@@ -22,7 +24,7 @@ type KVServer struct {
 	rsm  *rsm.RSM
 
 	// Your definitions here.
-	store map[string]Value
+	Store map[string]Value
 	mu sync.Mutex
 }
 
@@ -45,11 +47,36 @@ func (kv *KVServer) DoOp(req any) any {
 
 func (kv *KVServer) Snapshot() []byte {
 	// Your code here
-	return nil
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	raft.DPrintf("KVSERVER %v SNAPSHOT",kv.me)
+
+	buf := new(bytes.Buffer)
+	encoder := labgob.NewEncoder(buf)
+	encoder.Encode(kv.Store)
+
+	return buf.Bytes()
 }
 
 func (kv *KVServer) Restore(data []byte) {
 	// Your code here
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	raft.DPrintf("KVSERVER %v RESTORE",kv.me)
+
+	
+	buf := bytes.NewBuffer(data)
+	decoder := labgob.NewDecoder(buf)
+
+	var Store map[string]Value
+
+	if decoder.Decode(&Store) != nil {
+		panic ("ERROR DECODING STATE")
+	} else {
+		kv.Store = Store
+	}
 }
 
 func (kv *KVServer) DoGet(args rpc.GetArgs) rpc.GetReply {
@@ -58,7 +85,7 @@ func (kv *KVServer) DoGet(args rpc.GetArgs) rpc.GetReply {
 
 	reply := rpc.GetReply{}
 
-	if val, ok := kv.store[args.Key]; ok {
+	if val, ok := kv.Store[args.Key]; ok {
 		reply.Value = val.Value
 		reply.Version = val.Version
 		reply.Err = rpc.OK
@@ -75,16 +102,16 @@ func (kv *KVServer) DoPut(args rpc.PutArgs) rpc.PutReply {
 	
 	reply := rpc.PutReply{}
 
-	if val, ok := kv.store[args.Key]; ok {
+	if val, ok := kv.Store[args.Key]; ok {
 		if val.Version == args.Version {
-			kv.store[args.Key] = Value{Value: args.Value, Version: args.Version + 1}
+			kv.Store[args.Key] = Value{Value: args.Value, Version: args.Version + 1}
 			reply.Err = rpc.OK
 		} else {
 			reply.Err = rpc.ErrVersion
 		}
 	} else {
 		if args.Version == 0 {
-			kv.store[args.Key] = Value{Value: args.Value, Version: 1}
+			kv.Store[args.Key] = Value{Value: args.Value, Version: 1}
 			reply.Err = rpc.OK
 		} else {
 			reply.Err = rpc.ErrNoKey
@@ -147,7 +174,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, gid tester.Tgid, me int, persist
 
 	kv := &KVServer{
 		me: me,
-		store: make(map[string]Value),
+		Store: make(map[string]Value),
 	}
 
 

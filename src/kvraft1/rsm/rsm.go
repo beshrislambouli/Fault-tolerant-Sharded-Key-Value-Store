@@ -2,13 +2,13 @@ package rsm
 
 import (
 	"sync"
+	"time"
 
 	"6.5840/kvsrv1/rpc"
 	"6.5840/labrpc"
 	"6.5840/raft1"
 	"6.5840/raftapi"
 	"6.5840/tester1"
-
 )
 
 var useRaftStateMachine bool // to plug in another raft besided raft1
@@ -47,6 +47,8 @@ type RSM struct {
 	index int
 	term int
 	isLeader bool
+
+	LastAppliedIndex int
 }
 
 // servers[] contains the ports of the set of
@@ -71,11 +73,22 @@ func MakeRSM(servers []*labrpc.ClientEnd, me int, persister *tester.Persister, m
 		applyCh:      make(chan raftapi.ApplyMsg),
 		sm:           sm,
 		resCh:        make(chan any),
+		LastAppliedIndex: -1,
 	}
 	if !useRaftStateMachine {
 		rsm.rf = raft.Make(servers, me, persister, rsm.applyCh)
 	}
+	
+	raft.DPrintf("RSM %v just started",rsm.me)
+
+	data := persister.ReadSnapshot()
+	if len (data) > 0 {
+		raft.DPrintf("RSM %v restore after rebooting",rsm.me)
+		rsm.sm.Restore(data)
+	}
+
 	go rsm.Reader()
+	go rsm.CheckSnapshot()
 	return rsm
 }
 
@@ -115,12 +128,27 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 func (rsm *RSM) Reader() {
 	for replicated := range rsm.applyCh {
 		raft.DPrintf("Reader %v - Command: %v",rsm.me,replicated)
+
+		if replicated.Command == "PUSH" {continue}
+		
+		if replicated.SnapshotValid {
+			raft.DPrintf("Reader %v INSTALLING SNAPSHOT with this index %v",rsm.me,replicated.SnapshotIndex)
+			rsm.mu.Lock()
+			rsm.sm.Restore(replicated.Snapshot)
+			rsm.LastAppliedIndex = replicated.SnapshotIndex
+			rsm.mu.Unlock()
+			continue
+		}
+
+		rsm.mu.Lock()
+
 		res := rsm.sm.DoOp(replicated.Command)
+		rsm.LastAppliedIndex = replicated.CommandIndex
+		
 
 		curIndex := replicated.CommandIndex
 		curTerm, curIsLeader := rsm.rf.GetState()
 
-		rsm.mu.Lock()
 		raft.DPrintf("Reader %v - RSM_State: index: %v term: %v isLeader: %v",rsm.me,rsm.index,rsm.term,rsm.isLeader)
 		raft.DPrintf("Reader %v - CUR_State: index: %v term: %v isLeader: %v",rsm.me,curIndex,curTerm,curIsLeader)
 		if curIndex < rsm.index {rsm.mu.Unlock(); continue}
@@ -136,4 +164,18 @@ func (rsm *RSM) Reader() {
 	}
 	raft.DPrintf("Reader %v Closing Channel",rsm.me)
 	close(rsm.resCh)
+}
+
+
+func (rsm *RSM) CheckSnapshot() {
+
+	for rsm.maxraftstate != -1 { // TODO: should check killed??
+
+		if rsm.rf.PersistBytes() > rsm.maxraftstate {
+			raft.DPrintf("RSM %v too big -> snapshot",rsm.me)
+			rsm.rf.Snapshot(rsm.LastAppliedIndex,rsm.sm.Snapshot())
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
 }
