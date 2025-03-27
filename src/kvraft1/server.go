@@ -154,6 +154,7 @@ func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
 // about this, but it may be convenient (for example)
 // to suppress debug output from a Kill()ed instance.
 func (kv *KVServer) Kill() {
+	raft.DPrintf("KVSERVER %v got killed",kv.me)
 	atomic.StoreInt32(&kv.dead, 1)
 	// Your code here, if desired.
 }

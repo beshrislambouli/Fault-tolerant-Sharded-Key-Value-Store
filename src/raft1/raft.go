@@ -424,6 +424,7 @@ func (rf *Raft) snapshotAlreadyUpToDate(lastIndexInLeaderSnapshot int) bool {
 // confusing debug output. any goroutine with a long-running loop
 // should call killed() to check whether it should stop.
 func (rf *Raft) Kill() {
+	DPrintf("RAFT %v got killed",rf.me)
 	atomic.StoreInt32(&rf.dead, 1)
 	close (rf.applyCh)
 }
@@ -448,6 +449,7 @@ func Make(
 	persister *tester.Persister,
 	applyCh chan raftapi.ApplyMsg,
 ) *Raft {
+	DPrintf("RAFT %v is starting",me)
 	rf := &Raft{}
 	rf.peers = peers
 	rf.persister = persister
@@ -478,9 +480,9 @@ func (rf *Raft) monitorCommittedEntries() {
 			rf.lastApplied++
 
 			rf.sendCommittedEntry(rf.lastApplied)
+		} else {
+			rf.mu.Unlock()
 		}
-
-		rf.mu.Unlock()
 
 		time.Sleep(WaitInterval)
 	}
@@ -492,7 +494,13 @@ func (rf *Raft) sendCommittedEntry(index int) {
 		CommandIndex: index,
 		Command: rf.log[index - rf.indexOffset - 1].Command,
 	}
-	rf.applyCh <- newMessage
+	rf.mu.Unlock()
+	select {
+	case rf.applyCh <- newMessage:
+		// Successfully sent message
+	default:
+		// Channel is closed - ignore the message
+	}
 }
 
 // periodically check if a leader election should be started
@@ -599,7 +607,7 @@ func (rf *Raft) wonElection(votes int) bool  {
 }
 
 func (rf *Raft) convertToLeader() {
-	DPrintf("RAFT %v is LEADER",rf.me)
+	DPrintf("RAFT %v is LEADER at TERM %v",rf.me,rf.currentTerm)
 	rf.state = "leader"
 	rf.lastRecieved = time.Now()
 
