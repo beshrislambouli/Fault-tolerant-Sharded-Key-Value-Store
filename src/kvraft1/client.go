@@ -6,6 +6,7 @@ import (
 
 	"6.5840/kvsrv1/rpc"
 	"6.5840/kvtest1"
+	raft "6.5840/raft1"
 	"6.5840/tester1"
 )
 
@@ -77,11 +78,16 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 					time.Sleep(100 * time.Millisecond)
 					continue
 				}
+				if reply.Err == rpc.ErrWrongGroup {
+					raft.DPrintf("ErrWrongGroup")
+					return
+				}
 				break
 			}
 			
 			z := atomic.LoadInt32(&done)
-			if z != 0 {panic("error")}
+			raft.DPrintf("YES! args: %v got res: %v",args,reply)
+			if z != 0 {return; panic("error")}
 			res = reply
 			atomic.StoreInt32(&done, 1)
 
@@ -172,11 +178,16 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 					time.Sleep(100 * time.Millisecond)
 					continue
 				}
+				if reply.Err == rpc.ErrWrongGroup {
+					raft.DPrintf("ErrWrongGroup")
+					return
+				}
 				break
 			}
 
 			z := atomic.LoadInt32(&leader)
-			if z != -1 {panic("error")}
+			raft.DPrintf("YES! args: %v got res: %v",args,reply)
+			if z != -1 {return; panic("error")}
 			res = reply
 			atomic.StoreInt32(&leader,int32(server))
 

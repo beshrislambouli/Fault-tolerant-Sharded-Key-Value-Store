@@ -425,8 +425,6 @@ func (rf *Raft) snapshotAlreadyUpToDate(lastIndexInLeaderSnapshot int) bool {
 // should call killed() to check whether it should stop.
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
 	close (rf.applyCh)
 }
 
@@ -601,6 +599,7 @@ func (rf *Raft) wonElection(votes int) bool  {
 }
 
 func (rf *Raft) convertToLeader() {
+	DPrintf("RAFT %v is LEADER",rf.me)
 	rf.state = "leader"
 	rf.lastRecieved = time.Now()
 

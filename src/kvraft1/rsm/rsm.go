@@ -98,24 +98,31 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 	defer rsm.muQuery.Unlock()
 
 	rsm.mu.Lock()
+	raft.DPrintf("RSM %v - Query Start: %v",rsm.me,req)
 	rsm.index, rsm.term, rsm.isLeader = rsm.rf.Start(req)
+	raft.DPrintf("RSM %v - Query Start Res: index: %v term: %v isLeader: %v",rsm.me,rsm.index,rsm.term,rsm.isLeader)
 	if !rsm.isLeader {rsm.mu.Unlock(); return rpc.ErrWrongLeader, nil}
 	rsm.mu.Unlock()
-
+	raft.DPrintf("RSM %v is waiting for args: %v",rsm.me, req)
 	res, ok := <- rsm.resCh
-	if !ok || res == "ERROR" {return rpc.ErrWrongLeader, nil}
+	raft.DPrintf("RSM %v, Done waiting, gonna send: %v %v",rsm.me,res,ok)
+	if !ok {return rpc.ErrWrongGroup, nil}
+	if res == "ERROR" {return rpc.ErrWrongLeader, nil}
 
 	return rpc.OK, res 
 }
 
 func (rsm *RSM) Reader() {
 	for replicated := range rsm.applyCh {
+		raft.DPrintf("Reader %v - Command: %v",rsm.me,replicated)
 		res := rsm.sm.DoOp(replicated.Command)
 
 		curIndex := replicated.CommandIndex
 		curTerm, curIsLeader := rsm.rf.GetState()
 
 		rsm.mu.Lock()
+		raft.DPrintf("Reader %v - RSM_State: index: %v term: %v isLeader: %v",rsm.me,rsm.index,rsm.term,rsm.isLeader)
+		raft.DPrintf("Reader %v - CUR_State: index: %v term: %v isLeader: %v",rsm.me,curIndex,curTerm,curIsLeader)
 		if curIndex < rsm.index {rsm.mu.Unlock(); continue}
 		if !rsm.isLeader {rsm.mu.Unlock(); continue}
 
@@ -127,5 +134,6 @@ func (rsm *RSM) Reader() {
 			rsm.resCh <- res
 		}
 	}
+	raft.DPrintf("Reader %v Closing Channel",rsm.me)
 	close(rsm.resCh)
 }
