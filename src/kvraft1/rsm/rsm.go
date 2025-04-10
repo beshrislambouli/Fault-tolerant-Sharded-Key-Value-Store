@@ -119,7 +119,7 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 	raft.DPrintf("RSM %v is waiting for args: %v",rsm.me, req)
 	res, ok := <- rsm.resCh
 	raft.DPrintf("RSM %v, Done waiting, gonna send: %v %v",rsm.me,res,ok)
-	if !ok {return rpc.ErrWrongGroup, nil}
+	if !ok {return rpc.ErrClosedApplyCh, nil}
 	if res == "ERROR" {return rpc.ErrWrongLeader, nil}
 
 	return rpc.OK, res 

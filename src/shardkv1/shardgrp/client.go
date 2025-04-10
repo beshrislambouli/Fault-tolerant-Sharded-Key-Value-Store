@@ -42,7 +42,7 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 					time.Sleep(100 * time.Millisecond)
 					continue
 				}
-				if reply.Err == rpc.ErrWrongGroup {
+				if reply.Err == rpc.ErrClosedApplyCh {
 					return
 				}
 				break
@@ -95,7 +95,7 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 					time.Sleep(100 * time.Millisecond)
 					continue
 				}
-				if reply.Err == rpc.ErrWrongGroup {
+				if reply.Err == rpc.ErrClosedApplyCh {
 					return
 				}
 				break

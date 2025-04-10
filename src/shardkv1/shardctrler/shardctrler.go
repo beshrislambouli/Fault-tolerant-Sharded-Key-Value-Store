@@ -54,6 +54,16 @@ func (sck *ShardCtrler) InitConfig(cfg *shardcfg.ShardConfig) {
 // controller.
 func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
 	// Your code here.
+
+	//"freeze" the shard at the source shardgrp, causing that shardgrp to reject Put's
+	//copy (install) the shard to the destination shardgrp
+	//delete the frozen shard
+	//post a new configuration so that clients can find the moved shard
+
+
+	// notes
+	// ChangeConfigTo will have a Num one larger than the previous one
+	// reject old FreezeShard, InstallShard, and DeleteShard RPCs,
 }
 
 
