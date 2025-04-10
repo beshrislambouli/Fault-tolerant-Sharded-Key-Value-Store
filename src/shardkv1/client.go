@@ -9,10 +9,11 @@ package shardkv
 //
 
 import (
-
 	"6.5840/kvsrv1/rpc"
 	"6.5840/kvtest1"
+	"6.5840/shardkv1/shardcfg"
 	"6.5840/shardkv1/shardctrler"
+	"6.5840/shardkv1/shardgrp"
 	"6.5840/tester1"
 )
 
@@ -30,6 +31,11 @@ func MakeClerk(clnt *tester.Clnt, sck *shardctrler.ShardCtrler) kvtest.IKVClerk 
 		sck:  sck,
 	}
 	// You'll have to add code here.
+
+	// scfg := shardcfg.MakeShardConfig()
+	// scfg.JoinBalance(map[tester.Tgid][]string{shardcfg.Gid1: []string{"xxx"}})
+	// sck.InitConfig(scfg)
+
 	return ck
 }
 
@@ -41,11 +47,19 @@ func MakeClerk(clnt *tester.Clnt, sck *shardctrler.ShardCtrler) kvtest.IKVClerk 
 // calling shardgrp.MakeClerk(ck.clnt, servers).
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 	// You will have to modify this function.
-	return "", 0, ""
+	cfg := ck.sck.Query()
+	_, servers, _ := cfg.GidServers(shardcfg.Key2Shard(key));
+
+	ck_grp := shardgrp.MakeClerk(ck.clnt, servers);
+	return ck_grp.Get(key);
 }
 
 // Put a key to a shard group.
 func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 	// You will have to modify this function.
-	return ""
+	cfg := ck.sck.Query()
+	_, servers, _ := cfg.GidServers(shardcfg.Key2Shard(key));
+
+	ck_grp := shardgrp.MakeClerk(ck.clnt, servers);
+	return ck_grp.Put(key,value,version);
 }
