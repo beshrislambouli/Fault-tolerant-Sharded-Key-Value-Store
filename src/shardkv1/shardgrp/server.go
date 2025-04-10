@@ -1,14 +1,16 @@
 package shardgrp
 
 import (
-	"sync/atomic"
-	"sync"
 	"bytes"
+	"sync"
+	"sync/atomic"
 
 	"6.5840/kvraft1/rsm"
+	kvsrv "6.5840/kvsrv1"
 	"6.5840/kvsrv1/rpc"
 	"6.5840/labgob"
 	"6.5840/labrpc"
+	"6.5840/shardkv1/shardcfg"
 	"6.5840/shardkv1/shardgrp/shardrpc"
 	"6.5840/tester1"
 )
@@ -28,6 +30,9 @@ type KVServer struct {
 	// Your code here
 	Store map[string]Value
 	mu sync.Mutex
+
+	FrozenShards map[shardcfg.Tshid]bool
+	NumCFG int
 }
 
 
@@ -38,6 +43,12 @@ func (kv *KVServer) DoOp(req any) any {
 		return kv.DoGet(args)
 	case rpc.PutArgs:
 		return kv.DoPut(args)
+	case shardrpc.FreezeShardArgs:
+		return kv.DoFreezeShard(args)
+	case shardrpc.InstallShardArgs:
+		return kv.DoInstallShard(args)
+	case shardrpc.DeleteShardArgs:
+		return kv.DoDeleteShard(args)
 	default:
 		panic("Not Known Request")
 	}
@@ -117,8 +128,92 @@ func (kv *KVServer) DoPut(args rpc.PutArgs) rpc.PutReply {
 	return reply
 }
 
+func (kv *KVServer) DoFreezeShard(args shardrpc.FreezeShardArgs) shardrpc.FreezeShardReply {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	reply := shardrpc.FreezeShardReply{}
+
+	// add the shard to the frozen shard to reject put/get on it
+	kv.FrozenShards[args.Shard] = true
+
+	// collect the data relevent to this shard
+	Store_Shard := make(map[string]Value)
+	for key, value := range kv.Store {
+		if shardcfg.Key2Shard(key) == args.Shard {
+			Store_Shard[key] = value
+		}
+	}
+
+	// code the data
+	buf := new(bytes.Buffer)
+	encoder := labgob.NewEncoder(buf)
+	encoder.Encode(Store_Shard)
+
+	// reply the data
+	reply.State = buf.Bytes()
+
+	reply.Err = rpc.OK
+	return reply
+}
+
+func (kv *KVServer) DoInstallShard(args shardrpc.InstallShardArgs) shardrpc.InstallShardReply {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	reply := shardrpc.InstallShardReply{}
+
+	// delete the shard to the frozen shards if it was there to accept put/get on it
+	kv.FrozenShards[args.Shard] = false
+
+	// decode the data
+	buf := bytes.NewBuffer(args.State)
+	decoder := labgob.NewDecoder(buf)
+	var Store_Shard map[string]Value
+	decoder.Decode(&Store_Shard) 
+	
+	// install the data
+	for key, value := range Store_Shard {
+		kv.Store [key] = value
+	}
+	
+	reply.Err = rpc.OK
+	return reply
+}
+
+func (kv *KVServer) DoDeleteShard(args shardrpc.DeleteShardArgs) shardrpc.DeleteShardReply {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	reply := shardrpc.DeleteShardReply{}
+
+
+	// delete the shard to the frozen shards if it was there to accept put/get on it
+	kv.FrozenShards[args.Shard] = false
+
+	// collect the data relevent to this shard
+	var keys_to_delete []string
+	for key := range kv.Store {
+		if shardcfg.Key2Shard(key) == args.Shard {
+			keys_to_delete = append(keys_to_delete,key)
+		}
+	}
+
+	// delete the data relevent to this shard from the store
+	for _, key := range keys_to_delete {
+		delete(kv.Store, key)
+	}
+
+
+	reply.Err = rpc.OK
+	return reply
+}
+
 func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 	// Your code hereerr, res := kv.rsm.Submit(*args)
+	if kv.FrozenShards[shardcfg.Key2Shard(args.Key)] {
+		kvsrv.DPrintf("regrewg1")
+	}
 	err, res := kv.rsm.Submit(*args)
 	if err != rpc.OK {
 		reply.Err = err
@@ -129,6 +224,9 @@ func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 
 func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
 	// Your code here
+	if kv.FrozenShards[shardcfg.Key2Shard(args.Key)] {
+		kvsrv.DPrintf("regrewg2")
+	}
 	err, res := kv.rsm.Submit(*args)
 	if err != rpc.OK {
 		reply.Err = err 
@@ -141,16 +239,34 @@ func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
 // shard) and return the key/values stored in that shard.
 func (kv *KVServer) FreezeShard(args *shardrpc.FreezeShardArgs, reply *shardrpc.FreezeShardReply) {
 	// Your code here
+	err, res := kv.rsm.Submit(*args)
+	if err != rpc.OK {
+		reply.Err = err
+		return
+	}
+	*reply = res.(shardrpc.FreezeShardReply)
 }
 
 // Install the supplied state for the specified shard.
 func (kv *KVServer) InstallShard(args *shardrpc.InstallShardArgs, reply *shardrpc.InstallShardReply) {
 	// Your code here
+	err, res := kv.rsm.Submit(*args)
+	if err != rpc.OK {
+		reply.Err = err
+		return
+	}
+	*reply = res.(shardrpc.InstallShardReply)
 }
 
 // Delete the specified shard.
 func (kv *KVServer) DeleteShard(args *shardrpc.DeleteShardArgs, reply *shardrpc.DeleteShardReply) {
 	// Your code here
+	err, res := kv.rsm.Submit(*args)
+	if err != rpc.OK {
+		reply.Err = err
+		return
+	}
+	*reply = res.(shardrpc.DeleteShardReply)
 }
 
 // the tester calls Kill() when a KVServer instance won't
@@ -189,6 +305,8 @@ func StartServerShardGrp(servers []*labrpc.ClientEnd, gid tester.Tgid, me int, p
 		gid: gid, 
 		me: me,
 		Store: make(map[string]Value),
+		FrozenShards: make(map[shardcfg.Tshid]bool),
+		NumCFG: -1,
 	}
 	kv.rsm = rsm.MakeRSM(servers, me, persister, maxraftstate, kv)
 

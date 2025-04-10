@@ -5,13 +5,13 @@ package shardctrler
 //
 
 import (
-
 	"6.5840/kvsrv1"
 	"6.5840/kvtest1"
 	"6.5840/shardkv1/shardcfg"
+
+	"6.5840/shardkv1/shardgrp"
 	"6.5840/tester1"
 )
-
 
 // ShardCtrler for the controller and kv clerk.
 type ShardCtrler struct {
@@ -52,18 +52,37 @@ func (sck *ShardCtrler) InitConfig(cfg *shardcfg.ShardConfig) {
 // configuration from the current one to new.  While the controller
 // changes the configuration it may be superseded by another
 // controller.
-func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
+func (sck *ShardCtrler) ChangeConfigTo(new_cfg *shardcfg.ShardConfig) {
 	// Your code here.
 
-	//"freeze" the shard at the source shardgrp, causing that shardgrp to reject Put's
-	//copy (install) the shard to the destination shardgrp
-	//delete the frozen shard
-	//post a new configuration so that clients can find the moved shard
+	cfg, V, _ := sck.IKVClerk.Get("cfg");
+	old_cfg := shardcfg.FromString(cfg);
+	
+	// kvsrv.DPrintf("%v",old_cfg)
+	// kvsrv.DPrintf("%v",new_cfg)
 
+	for sh := 0 ; sh < len(old_cfg.Shards) ; sh ++ {
+		old_g := old_cfg.Shards[sh]
+		new_g := new_cfg.Shards[sh]
+		if old_g == new_g {continue}
 
-	// notes
-	// ChangeConfigTo will have a Num one larger than the previous one
-	// reject old FreezeShard, InstallShard, and DeleteShard RPCs,
+		old_servers := old_cfg.Groups[old_g];
+		new_servers := new_cfg.Groups[new_g];
+
+		old_ck := shardgrp.MakeClerk(sck.clnt, old_servers);
+		new_ck := shardgrp.MakeClerk(sck.clnt, new_servers); 
+
+		//"freeze" the shard at the source shardgrp, causing that shardgrp to reject Put's
+		State, _ := old_ck.FreezeShard(shardcfg.Tshid(sh), new_cfg.Num)
+
+		//copy (install) the shard to the destination shardgrp
+		new_ck.InstallShard(shardcfg.Tshid(sh), State, new_cfg.Num)
+
+		//delete the frozen shard
+		old_ck.DeleteShard(shardcfg.Tshid(sh), new_cfg.Num)
+	}
+
+	sck.IKVClerk.Put("cfg",new_cfg.String(),V)
 }
 
 

@@ -6,6 +6,7 @@ import (
 
 	"6.5840/kvsrv1/rpc"
 	"6.5840/shardkv1/shardcfg"
+	"6.5840/shardkv1/shardgrp/shardrpc"
 	"6.5840/tester1"
 )
 
@@ -123,15 +124,150 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 
 func (ck *Clerk) FreezeShard(s shardcfg.Tshid, num shardcfg.Tnum) ([]byte, rpc.Err) {
 	// Your code here
-	return nil, ""
+
+	var done int32
+	atomic.StoreInt32(&done, 0)
+	res := shardrpc.FreezeShardReply{}
+
+	for i := 0 ; i < len(ck.servers) ; i ++ {
+		go func(server int) {
+
+			args := shardrpc.FreezeShardArgs {
+				Shard: s,
+				Num: num,
+			}
+			reply := shardrpc.FreezeShardReply{}
+			
+			for {
+				z := atomic.LoadInt32(&done)
+				if z != 0 {return}
+
+				ok := ck.clnt.Call(ck.servers[server], "KVServer.FreezeShard", &args, &reply)
+				if !ok || reply.Err == rpc.ErrWrongLeader {
+					time.Sleep(100 * time.Millisecond)
+					continue
+				}
+				if reply.Err == rpc.ErrClosedApplyCh {
+					return
+				}
+				break
+			}
+			
+			z := atomic.LoadInt32(&done)
+			if z != 0 {return; panic("error")}
+			res = reply
+			atomic.StoreInt32(&done, 1)
+
+		}(i)
+	}
+
+	for {
+		z := atomic.LoadInt32(&done)
+		if z != 0 {break}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// if res.Err == rpc.ErrNoKey {
+	// 	return "", 0, res.Err
+	// }
+	return res.State, res.Err
 }
 
 func (ck *Clerk) InstallShard(s shardcfg.Tshid, state []byte, num shardcfg.Tnum) rpc.Err {
-	// Your code here
-	return ""
+	var done int32
+	atomic.StoreInt32(&done, 0)
+	res := shardrpc.InstallShardReply{}
+
+	for i := 0 ; i < len(ck.servers) ; i ++ {
+		go func(server int) {
+
+			args := shardrpc.InstallShardArgs {
+				Shard: s,
+				State: state,
+				Num: num,
+			}
+			reply := shardrpc.InstallShardReply{}
+			
+			for {
+				z := atomic.LoadInt32(&done)
+				if z != 0 {return}
+
+				ok := ck.clnt.Call(ck.servers[server], "KVServer.InstallShard", &args, &reply)
+				if !ok || reply.Err == rpc.ErrWrongLeader {
+					time.Sleep(100 * time.Millisecond)
+					continue
+				}
+				if reply.Err == rpc.ErrClosedApplyCh {
+					return
+				}
+				break
+			}
+			
+			z := atomic.LoadInt32(&done)
+			if z != 0 {return; panic("error")}
+			res = reply
+			atomic.StoreInt32(&done, 1)
+
+		}(i)
+	}
+
+	for {
+		z := atomic.LoadInt32(&done)
+		if z != 0 {break}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// if res.Err == rpc.ErrNoKey {
+	// 	return "", 0, res.Err
+	// }
+	return res.Err
 }
 
 func (ck *Clerk) DeleteShard(s shardcfg.Tshid, num shardcfg.Tnum) rpc.Err {
-	// Your code here
-	return ""
+	var done int32
+	atomic.StoreInt32(&done, 0)
+	res := shardrpc.DeleteShardReply{}
+
+	for i := 0 ; i < len(ck.servers) ; i ++ {
+		go func(server int) {
+
+			args := shardrpc.DeleteShardArgs {
+				Shard: s,
+				Num: num,
+			}
+			reply := shardrpc.DeleteShardReply{}
+			
+			for {
+				z := atomic.LoadInt32(&done)
+				if z != 0 {return}
+
+				ok := ck.clnt.Call(ck.servers[server], "KVServer.DeleteShard", &args, &reply)
+				if !ok || reply.Err == rpc.ErrWrongLeader {
+					time.Sleep(100 * time.Millisecond)
+					continue
+				}
+				if reply.Err == rpc.ErrClosedApplyCh {
+					return
+				}
+				break
+			}
+			
+			z := atomic.LoadInt32(&done)
+			if z != 0 {return; panic("error")}
+			res = reply
+			atomic.StoreInt32(&done, 1)
+
+		}(i)
+	}
+
+	for {
+		z := atomic.LoadInt32(&done)
+		if z != 0 {break}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// if res.Err == rpc.ErrNoKey {
+	// 	return "", 0, res.Err
+	// }
+	return res.Err
 }

@@ -171,11 +171,11 @@ func (rsm *RSM) CheckSnapshot() {
 
 	for rsm.maxraftstate != -1 { // TODO: should check killed??
 
-		if rsm.rf.PersistBytes() > rsm.maxraftstate {
+		if rsm.rf.PersistBytes() > rsm.maxraftstate - rsm.maxraftstate/4 {
 			raft.DPrintf("RSM %v too big -> snapshot",rsm.me)
 			rsm.rf.Snapshot(rsm.LastAppliedIndex,rsm.sm.Snapshot())
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 }

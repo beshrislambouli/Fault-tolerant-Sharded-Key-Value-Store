@@ -47,19 +47,34 @@ func MakeClerk(clnt *tester.Clnt, sck *shardctrler.ShardCtrler) kvtest.IKVClerk 
 // calling shardgrp.MakeClerk(ck.clnt, servers).
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 	// You will have to modify this function.
-	cfg := ck.sck.Query()
-	_, servers, _ := cfg.GidServers(shardcfg.Key2Shard(key));
+	for {
+		cfg := ck.sck.Query()
+		_, servers, _ := cfg.GidServers(shardcfg.Key2Shard(key));
 
-	ck_grp := shardgrp.MakeClerk(ck.clnt, servers);
-	return ck_grp.Get(key);
+		ck_grp := shardgrp.MakeClerk(ck.clnt, servers);
+
+		res, v , err := ck_grp.Get(key);
+		if err == rpc.ErrWrongGroup {
+			continue
+		}
+		return res, v , err
+	}
+	
 }
 
 // Put a key to a shard group.
 func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 	// You will have to modify this function.
-	cfg := ck.sck.Query()
-	_, servers, _ := cfg.GidServers(shardcfg.Key2Shard(key));
+	for {
+		cfg := ck.sck.Query()
+		_, servers, _ := cfg.GidServers(shardcfg.Key2Shard(key));
 
-	ck_grp := shardgrp.MakeClerk(ck.clnt, servers);
-	return ck_grp.Put(key,value,version);
+		ck_grp := shardgrp.MakeClerk(ck.clnt, servers);
+		err := ck_grp.Put(key,value,version);
+		if err == rpc.ErrWrongGroup {
+			continue
+		}
+		return err
+	}
+	
 }
