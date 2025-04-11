@@ -2,11 +2,12 @@ package shardgrp
 
 import (
 	"bytes"
+	// "log"
 	"sync"
 	"sync/atomic"
 
 	"6.5840/kvraft1/rsm"
-	kvsrv "6.5840/kvsrv1"
+	// kvsrv "6.5840/kvsrv1"
 	"6.5840/kvsrv1/rpc"
 	"6.5840/labgob"
 	"6.5840/labrpc"
@@ -32,7 +33,7 @@ type KVServer struct {
 	mu sync.Mutex
 
 	FrozenShards map[shardcfg.Tshid]bool
-	NumCFG int
+	NumCFG shardcfg.Tnum
 }
 
 
@@ -92,6 +93,11 @@ func (kv *KVServer) DoGet(args rpc.GetArgs) rpc.GetReply {
 
 	reply := rpc.GetReply{}
 
+	if kv.FrozenShards[shardcfg.Key2Shard(args.Key)] {
+		reply.Err = rpc.ErrWrongGroup
+		return reply
+	}
+
 	if val, ok := kv.Store[args.Key]; ok {
 		reply.Value = val.Value
 		reply.Version = val.Version
@@ -108,6 +114,11 @@ func (kv *KVServer) DoPut(args rpc.PutArgs) rpc.PutReply {
 	defer kv.mu.Unlock()
 	
 	reply := rpc.PutReply{}
+
+	if kv.FrozenShards[shardcfg.Key2Shard(args.Key)] {
+		reply.Err = rpc.ErrWrongGroup
+		return reply
+	}
 
 	if val, ok := kv.Store[args.Key]; ok {
 		if val.Version == args.Version {
@@ -133,6 +144,15 @@ func (kv *KVServer) DoFreezeShard(args shardrpc.FreezeShardArgs) shardrpc.Freeze
 	defer kv.mu.Unlock()
 
 	reply := shardrpc.FreezeShardReply{}
+	
+	if (args.Num >= kv.NumCFG) {
+		kv.NumCFG = args.Num
+	} else {
+		// log.Printf("ERROR DoFreezeShard")
+		reply.Err = rpc.ErrWrongGroup
+		return reply
+	}
+
 
 	// add the shard to the frozen shard to reject put/get on it
 	kv.FrozenShards[args.Shard] = true
@@ -163,6 +183,14 @@ func (kv *KVServer) DoInstallShard(args shardrpc.InstallShardArgs) shardrpc.Inst
 
 	reply := shardrpc.InstallShardReply{}
 
+	if (args.Num >= kv.NumCFG) {
+		kv.NumCFG = args.Num
+	} else {
+		// log.Printf("ERROR DoInstallShard")
+		reply.Err = rpc.ErrWrongGroup
+		return reply
+	}
+
 	// delete the shard to the frozen shards if it was there to accept put/get on it
 	kv.FrozenShards[args.Shard] = false
 
@@ -186,10 +214,17 @@ func (kv *KVServer) DoDeleteShard(args shardrpc.DeleteShardArgs) shardrpc.Delete
 	defer kv.mu.Unlock()
 
 	reply := shardrpc.DeleteShardReply{}
-
+	
+	if (args.Num >= kv.NumCFG) {
+		kv.NumCFG = args.Num
+	} else {
+		// log.Printf("ERROR DoDeleteShard")
+		reply.Err = rpc.ErrWrongGroup
+		return reply
+	}
 
 	// delete the shard to the frozen shards if it was there to accept put/get on it
-	kv.FrozenShards[args.Shard] = false
+	// kv.FrozenShards[args.Shard] = false
 
 	// collect the data relevent to this shard
 	var keys_to_delete []string
@@ -211,9 +246,6 @@ func (kv *KVServer) DoDeleteShard(args shardrpc.DeleteShardArgs) shardrpc.Delete
 
 func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 	// Your code hereerr, res := kv.rsm.Submit(*args)
-	if kv.FrozenShards[shardcfg.Key2Shard(args.Key)] {
-		kvsrv.DPrintf("regrewg1")
-	}
 	err, res := kv.rsm.Submit(*args)
 	if err != rpc.OK {
 		reply.Err = err
@@ -224,9 +256,6 @@ func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 
 func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
 	// Your code here
-	if kv.FrozenShards[shardcfg.Key2Shard(args.Key)] {
-		kvsrv.DPrintf("regrewg2")
-	}
 	err, res := kv.rsm.Submit(*args)
 	if err != rpc.OK {
 		reply.Err = err 

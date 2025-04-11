@@ -5,6 +5,8 @@ package shardctrler
 //
 
 import (
+	// "log"
+
 	"6.5840/kvsrv1"
 	"6.5840/kvtest1"
 	"6.5840/shardkv1/shardcfg"
@@ -72,16 +74,24 @@ func (sck *ShardCtrler) ChangeConfigTo(new_cfg *shardcfg.ShardConfig) {
 		old_ck := shardgrp.MakeClerk(sck.clnt, old_servers);
 		new_ck := shardgrp.MakeClerk(sck.clnt, new_servers); 
 
+		// log.Printf("Controler: Shard %v to move from group %v: %v to group %v: %v",sh, old_g, old_servers, new_g, new_servers)
+
 		//"freeze" the shard at the source shardgrp, causing that shardgrp to reject Put's
+		// log.Printf("Sent FreezeShard, %v", new_cfg.Num);
 		State, _ := old_ck.FreezeShard(shardcfg.Tshid(sh), new_cfg.Num)
+		// log.Printf("Got FreezeShard, %v", err1);
 
 		//copy (install) the shard to the destination shardgrp
+		// log.Printf("Sent InstallShard, %v", new_cfg.Num);
 		new_ck.InstallShard(shardcfg.Tshid(sh), State, new_cfg.Num)
+		// log.Printf("Got InstallShard, %v", err2);
 
 		//delete the frozen shard
+		// log.Printf("Sent DeleteShard, %v", new_cfg.Num);
 		old_ck.DeleteShard(shardcfg.Tshid(sh), new_cfg.Num)
+		// log.Printf("Got DeleteShard, %v", err3);
 	}
-
+	// log.Printf("Install new cfg %v", new_cfg);
 	sck.IKVClerk.Put("cfg",new_cfg.String(),V)
 }
 

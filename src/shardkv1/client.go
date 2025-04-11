@@ -9,6 +9,9 @@ package shardkv
 //
 
 import (
+	// "log"
+	"time"
+
 	"6.5840/kvsrv1/rpc"
 	"6.5840/kvtest1"
 	"6.5840/shardkv1/shardcfg"
@@ -47,14 +50,18 @@ func MakeClerk(clnt *tester.Clnt, sck *shardctrler.ShardCtrler) kvtest.IKVClerk 
 // calling shardgrp.MakeClerk(ck.clnt, servers).
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 	// You will have to modify this function.
+	// log.Printf("Get Client: on key %v",key)
 	for {
 		cfg := ck.sck.Query()
 		_, servers, _ := cfg.GidServers(shardcfg.Key2Shard(key));
+		// log.Printf("Get Client: current cfg: %v, server to ask: %v",cfg,servers)
 
 		ck_grp := shardgrp.MakeClerk(ck.clnt, servers);
 
 		res, v , err := ck_grp.Get(key);
+		// log.Printf("Get Client: Got %v %v %v", res, v, err)
 		if err == rpc.ErrWrongGroup {
+			time.Sleep(10 * time.Millisecond)
 			continue
 		}
 		return res, v , err
@@ -65,13 +72,20 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // Put a key to a shard group.
 func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 	// You will have to modify this function.
+
+	// log.Printf("Put Client: on key %v",key)
 	for {
 		cfg := ck.sck.Query()
 		_, servers, _ := cfg.GidServers(shardcfg.Key2Shard(key));
+		// log.Printf("Put Client: current cfg: %v, server to ask: %v",cfg,servers)
 
 		ck_grp := shardgrp.MakeClerk(ck.clnt, servers);
+
 		err := ck_grp.Put(key,value,version);
+		// log.Printf("Put Client: Got %v", err)
+
 		if err == rpc.ErrWrongGroup {
+			time.Sleep(10 * time.Millisecond)
 			continue
 		}
 		return err
