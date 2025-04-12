@@ -9,6 +9,7 @@ import (
 
 	"6.5840/kvsrv1"
 	"6.5840/kvsrv1/rpc"
+
 	// "6.5840/kvsrv1/rpc"
 	"6.5840/kvtest1"
 	"6.5840/shardkv1/shardcfg"
@@ -51,7 +52,7 @@ func (sck *ShardCtrler) InitController() {
 	// log.Printf("InitController %v %v",curr_cfg.Num,next_cfg.Num)
 	
 	if next_cfg.Num > curr_cfg.Num {
-		sck.ChangeConfigTo(next_cfg)
+		sck.ChangeConfigTo_helper(next_cfg,false)
 	}
 }
 
@@ -73,12 +74,34 @@ func (sck *ShardCtrler) InitConfig(cfg *shardcfg.ShardConfig) {
 // changes the configuration it may be superseded by another
 // controller.
 func (sck *ShardCtrler) ChangeConfigTo(new_cfg *shardcfg.ShardConfig) {
+	sck.ChangeConfigTo_helper(new_cfg,true)
+}
+func (sck *ShardCtrler) ChangeConfigTo_helper(new_cfg *shardcfg.ShardConfig, check bool) {
 	// Your code here.
-	// log.Printf("ChangeConfigTo %v",new_cfg.Num)
-	// update the next_cfg
-	_, V, _ := sck.IKVClerk.Get("next_cfg")
-	sck.IKVClerk.Put("next_cfg",new_cfg.String(),V)
+	// log.Printf("CHECK %v",check)
+	// log.Printf("ChangeConfigTo %v",new_cfg)
 
+
+	if check {
+		next_cfg_string, V, err := sck.IKVClerk.Get("next_cfg")
+		// log.Printf("Query1 got this %v %v %v",next_cfg_string, V , err)
+		if err == rpc.OK {
+			next_cfg := shardcfg.FromString(next_cfg_string)
+			// log.Printf("Query1 next_cfg %v",next_cfg)
+			if next_cfg.Num >= new_cfg.Num {
+				// log.Printf("OUT 1")
+				return
+			}
+		}
+
+		err = sck.IKVClerk.Put("next_cfg",new_cfg.String(),V)
+		// log.Printf("Query2 got this %v", err)
+		if err != rpc.OK {
+			// log.Printf("OUT 2")
+			return
+		}
+	}
+	
 	// get the old_cfg
 	cfg, V, _ := sck.IKVClerk.Get("cfg");
 	old_cfg := shardcfg.FromString(cfg);
