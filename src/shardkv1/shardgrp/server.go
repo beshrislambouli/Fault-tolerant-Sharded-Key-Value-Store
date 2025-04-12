@@ -32,8 +32,10 @@ type KVServer struct {
 	Store map[string]Value
 	mu sync.Mutex
 
-	FrozenShards map[shardcfg.Tshid]bool
-	NumCFG shardcfg.Tnum
+	FrozenShards 			map[shardcfg.Tshid]bool
+	NumCFG_FreezeShard 		map[shardcfg.Tshid]shardcfg.Tnum
+	NumCFG_InstallShard 	map[shardcfg.Tshid]shardcfg.Tnum
+	NumCFG_DeleteShard 		map[shardcfg.Tshid]shardcfg.Tnum
 }
 
 
@@ -145,17 +147,18 @@ func (kv *KVServer) DoFreezeShard(args shardrpc.FreezeShardArgs) shardrpc.Freeze
 
 	reply := shardrpc.FreezeShardReply{}
 	
-	if (args.Num >= kv.NumCFG) {
-		kv.NumCFG = args.Num
+
+	t := true
+	if args.Num > kv.NumCFG_FreezeShard[args.Shard] {
+		kv.NumCFG_FreezeShard[args.Shard] = args.Num
 	} else {
-		// log.Printf("ERROR DoFreezeShard")
+		t = false
 		reply.Err = rpc.ErrWrongGroup
-		return reply
 	}
 
 
 	// add the shard to the frozen shard to reject put/get on it
-	kv.FrozenShards[args.Shard] = true
+	if t { kv.FrozenShards[args.Shard] = true}
 
 	// collect the data relevent to this shard
 	Store_Shard := make(map[string]Value)
@@ -173,7 +176,7 @@ func (kv *KVServer) DoFreezeShard(args shardrpc.FreezeShardArgs) shardrpc.Freeze
 	// reply the data
 	reply.State = buf.Bytes()
 
-	reply.Err = rpc.OK
+	if t { reply.Err = rpc.OK }
 	return reply
 }
 
@@ -183,8 +186,8 @@ func (kv *KVServer) DoInstallShard(args shardrpc.InstallShardArgs) shardrpc.Inst
 
 	reply := shardrpc.InstallShardReply{}
 
-	if (args.Num >= kv.NumCFG) {
-		kv.NumCFG = args.Num
+	if args.Num > kv.NumCFG_InstallShard[args.Shard] {
+		kv.NumCFG_InstallShard[args.Shard] = args.Num
 	} else {
 		// log.Printf("ERROR DoInstallShard")
 		reply.Err = rpc.ErrWrongGroup
@@ -215,8 +218,8 @@ func (kv *KVServer) DoDeleteShard(args shardrpc.DeleteShardArgs) shardrpc.Delete
 
 	reply := shardrpc.DeleteShardReply{}
 	
-	if (args.Num >= kv.NumCFG) {
-		kv.NumCFG = args.Num
+	if args.Num > kv.NumCFG_DeleteShard[args.Shard] {
+		kv.NumCFG_DeleteShard[args.Shard] = args.Num
 	} else {
 		// log.Printf("ERROR DoDeleteShard")
 		reply.Err = rpc.ErrWrongGroup
@@ -335,7 +338,9 @@ func StartServerShardGrp(servers []*labrpc.ClientEnd, gid tester.Tgid, me int, p
 		me: me,
 		Store: make(map[string]Value),
 		FrozenShards: make(map[shardcfg.Tshid]bool),
-		NumCFG: -1,
+		NumCFG_FreezeShard : make(map[shardcfg.Tshid]shardcfg.Tnum),
+		NumCFG_InstallShard: make(map[shardcfg.Tshid]shardcfg.Tnum),
+		NumCFG_DeleteShard : make(map[shardcfg.Tshid]shardcfg.Tnum),
 	}
 	kv.rsm = rsm.MakeRSM(servers, me, persister, maxraftstate, kv)
 

@@ -637,7 +637,7 @@ func (rf *Raft) monitorCommitIndex() {
 		}
 
 		rf.mu.Unlock()
-		time.Sleep(BaseWaitInterval)
+		time.Sleep(1 * time.Millisecond)
 		rf.mu.Lock()
 	}
 }

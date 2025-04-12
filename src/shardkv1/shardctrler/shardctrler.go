@@ -8,6 +8,8 @@ import (
 	// "log"
 
 	"6.5840/kvsrv1"
+	"6.5840/kvsrv1/rpc"
+	// "6.5840/kvsrv1/rpc"
 	"6.5840/kvtest1"
 	"6.5840/shardkv1/shardcfg"
 
@@ -38,6 +40,19 @@ func MakeShardCtrler(clnt *tester.Clnt) *ShardCtrler {
 // controller. In part A, this method doesn't need to do anything. In
 // B and C, this method implements recovery.
 func (sck *ShardCtrler) InitController() {
+	next_cfg_string, _, err := sck.IKVClerk.Get("next_cfg")
+	if err != rpc.OK {return}
+	next_cfg := shardcfg.FromString(next_cfg_string)
+
+	curr_cfg_string, _, err := sck.IKVClerk.Get("cfg")
+	if err != rpc.OK {return}
+	curr_cfg := shardcfg.FromString(curr_cfg_string)
+
+	// log.Printf("InitController %v %v",curr_cfg.Num,next_cfg.Num)
+	
+	if next_cfg.Num > curr_cfg.Num {
+		sck.ChangeConfigTo(next_cfg)
+	}
 }
 
 // Called once by the tester to supply the first configuration.  You
@@ -47,6 +62,9 @@ func (sck *ShardCtrler) InitController() {
 // lists shardgrp shardcfg.Gid1 for all shards.
 func (sck *ShardCtrler) InitConfig(cfg *shardcfg.ShardConfig) {
 	// Your code here
+
+	// log.Printf("InitConfig %v",cfg.Num)
+
 	sck.IKVClerk.Put("cfg",cfg.String(),0);
 }
 
@@ -56,7 +74,12 @@ func (sck *ShardCtrler) InitConfig(cfg *shardcfg.ShardConfig) {
 // controller.
 func (sck *ShardCtrler) ChangeConfigTo(new_cfg *shardcfg.ShardConfig) {
 	// Your code here.
+	// log.Printf("ChangeConfigTo %v",new_cfg.Num)
+	// update the next_cfg
+	_, V, _ := sck.IKVClerk.Get("next_cfg")
+	sck.IKVClerk.Put("next_cfg",new_cfg.String(),V)
 
+	// get the old_cfg
 	cfg, V, _ := sck.IKVClerk.Get("cfg");
 	old_cfg := shardcfg.FromString(cfg);
 	
