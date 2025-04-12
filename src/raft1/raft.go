@@ -320,7 +320,7 @@ func (rf *Raft) commit() {
 		}
 
 		rf.mu.Unlock()
-		ms := 10
+		ms := 5
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 		rf.mu.Lock()
 	}
@@ -758,7 +758,7 @@ func (rf *Raft) applyCmd(index int) {
 		Command: rf.log[index-rf.SnapshotLogSz].Command,
 		CommandIndex: index+1,
 	}
-	rf.mu.Unlock()
+	// rf.mu.Unlock()
 	select {
 	case rf.applyCh <- msg:
 		// Successfully sent message
@@ -774,9 +774,9 @@ func (rf *Raft) applyLog() {
 		if rf.CommitIndex > rf.LastApplied && len(rf.log) + rf.SnapshotLogSz > rf.CommitIndex {
 			rf.LastApplied ++ 
 			rf.applyCmd(rf.LastApplied)
-		} else { 
-			rf.mu.Unlock()
 		}
+
+		rf.mu.Unlock()
 		ms := 1
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
