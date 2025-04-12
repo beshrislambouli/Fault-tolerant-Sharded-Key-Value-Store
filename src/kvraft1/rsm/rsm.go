@@ -77,6 +77,7 @@ func MakeRSM(servers []*labrpc.ClientEnd, me int, persister *tester.Persister, m
 	}
 	if !useRaftStateMachine {
 		rsm.rf = raft.Make(servers, me, persister, rsm.applyCh)
+		rsm.rf.Snapshot(-1,nil)
 	}
 	
 	raft.DPrintf("RSM %v just started",rsm.me)

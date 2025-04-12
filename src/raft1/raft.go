@@ -59,6 +59,8 @@ type Raft struct {
 	LastSnapshotIndex int
 	LastSnapshotTerm int
 	SnapshotLogSz int
+
+	external int
 }
 
 
@@ -150,20 +152,24 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.LastHeartBeat = time.Now()
 
-	if len(rf.log) == 0 {
+	if args.PrevLogIndex - rf.SnapshotLogSz < 0 {
 		if args.PrevLogIndex != rf.LastSnapshotIndex ||
 		   args.PrevLogTerm != rf.LastSnapshotTerm {
+			reply.Term = rf.CurrnetTerm
 			reply.Success = false
+			reply.XLen = -1
 			return
 		}
 	} else if args.PrevLogIndex - rf.SnapshotLogSz >= len(rf.log) {
 		reply.Success = false;
 		reply.XLen = len(rf.log) + rf.SnapshotLogSz
+		reply.Term = rf.CurrnetTerm
 		return
 	} else if args.PrevLogIndex - rf.SnapshotLogSz >= 0 && rf.log[args.PrevLogIndex-rf.SnapshotLogSz].Term != args.PrevLogTerm {
 		reply.Success = false;
 		reply.XTerm = rf.log[args.PrevLogIndex-rf.SnapshotLogSz].Term
 		reply.XIndex = -1 
+		reply.Term = rf.CurrnetTerm
 		for e := 0 ; e < len (rf.log) ; e ++ {
 			if rf.log[e].Term == rf.log[args.PrevLogIndex-rf.SnapshotLogSz].Term {
 				reply.XIndex = rf.log [e].Index // todo ?
@@ -320,7 +326,8 @@ func (rf *Raft) commit() {
 		}
 
 		rf.mu.Unlock()
-		ms := 5
+		ms := 10
+		if rf.external == 1 { ms = 5  }
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 		rf.mu.Lock()
 	}
@@ -405,9 +412,11 @@ func (rf *Raft) candidate() {
 	var once sync.Once
 	launch := func() {
 		rf.StartLeader()
-		rf.mu.Unlock()
-		rf.Start("PUSH")
-		rf.mu.Lock()
+		if rf.external == 1 {
+			rf.mu.Unlock()
+			rf.Start("PUSH")
+			rf.mu.Lock()
+		}
 	}
 
 
@@ -572,6 +581,11 @@ func (rf *Raft) PersistBytes() int {
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	if index == -1 {
+		rf.external = 1
+		return
+	}
 
 	index -- 
 
@@ -758,14 +772,17 @@ func (rf *Raft) applyCmd(index int) {
 		Command: rf.log[index-rf.SnapshotLogSz].Command,
 		CommandIndex: index+1,
 	}
-	// rf.mu.Unlock()
-	select {
-	case rf.applyCh <- msg:
-		// Successfully sent message
-	default:
-		// Channel is closed - ignore the message
+	if rf.external == 1 {
+		select {
+		case rf.applyCh <- msg:
+			// Successfully sent message
+		default:
+			// Channel is closed - ignore the message
+		}
+	} else {
+		rf.applyCh <- msg
 	}
-
+	
 }
 
 func (rf *Raft) applyLog() {
@@ -775,7 +792,6 @@ func (rf *Raft) applyLog() {
 			rf.LastApplied ++ 
 			rf.applyCmd(rf.LastApplied)
 		}
-
 		rf.mu.Unlock()
 		ms := 1
 		time.Sleep(time.Duration(ms) * time.Millisecond)
