@@ -1,4 +1,4 @@
-# 🧠 Distributed Sharded Key-Value Store
+# 🧠 Raft-based Distributed Sharded Key-Value Store
 
 A distributed, fault-tolerant, and linearizable key-value store built from scratch using the [Raft consensus algorithm](https://raft.github.io/). The system supports replication, snapshotting, sharding, and dynamic reconfiguration for high availability and scalability.
 
